@@ -1,46 +1,61 @@
-// SOLMAR BAY — pedestrians.js
-// One job: the people of ZENITH. Walkers amble the sidewalks between
-// random corners, pause, turn, and flee when a gun goes off or a car
-// screams past. One shared mesh builder, one update loop.
+// ZENITH — pedestrians.js (fresh rewrite, round 3)
+// The people of Zenith: one low-poly figure builder shared by the hero,
+// the walkers and the rival crew, plus the walker brain — a small state
+// machine (pause, stroll, flee) that keeps them on the pavements and
+// sends them running when shots ring out or a car comes too close.
 import * as THREE from 'three';
 import { TRAFFIC } from './config.js';
 
-const SHIRTS = [0xd95f4b, 0x4b8ad9, 0x53b06a, 0xd9b84b, 0x9a5fd0, 0xe8e8e8, 0x3a3f45, 0xe08aa8];
+const SHIRT_COLORS = [0xd95f4b, 0x4b8ad9, 0x53b06a, 0xd9b84b, 0x9a5fd0, 0xe8e8e8, 0x3a3f45, 0xe08aa8];
+const SKIN_TONES = [0xc98e6a, 0xa9744f, 0xe3b48f, 0x8a5a3c];
 
+// A person from boxes: torso, head, two legs, two arms. Limbs pivot at the
+// shoulder/hip so the walk cycle is just a sine on rotation.x.
 export function makePersonMesh(shirtColor, skinColor = 0xc98e6a) {
-  const g = new THREE.Group();
+  const group = new THREE.Group();
   const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
   const skin = new THREE.MeshLambertMaterial({ color: skinColor });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3440 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.85, 8), shirt);
-  body.position.y = 1.05;
-  g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), skin);
-  head.position.y = 1.72;
-  g.add(head);
-  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.62, 6), pants);
-  legL.position.set(-0.14, 0.31, 0);
-  g.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.14;
-  g.add(legR);
-  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.6, 6), shirt);
-  armL.position.set(-0.44, 1.1, 0);
-  g.add(armL);
-  const armR = armL.clone();
-  armR.position.x = 0.44;
-  g.add(armR);
-  return { group: g, legL, legR, armL, armR };
+  const trousers = new THREE.MeshLambertMaterial({ color: 0x2c3440 });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.78, 0.3), shirt);
+  torso.position.y = 1.08;
+  group.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.38, 0.34), skin);
+  head.position.y = 1.68;
+  group.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.1, 0.38), trousers);
+  cap.position.y = 1.9;
+  group.add(cap);
+
+  function limb(w, h, mat, x, y) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, 0);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
+    seg.position.y = -h / 2;
+    pivot.add(seg);
+    group.add(pivot);
+    return pivot;
+  }
+  const legL = limb(0.16, 0.68, trousers, -0.15, 0.7);
+  const legR = limb(0.16, 0.68, trousers, 0.15, 0.7);
+  const armL = limb(0.12, 0.58, shirt, -0.36, 1.4);
+  const armR = limb(0.12, 0.58, shirt, 0.36, 1.4);
+  return { group, legL, legR, armL, armR };
 }
 
 export function spawnPed(scene, x, z, rng, kind = 'walker') {
-  const shirt = SHIRTS[Math.floor(rng() * SHIRTS.length)];
-  const { group, legL, legR, armL, armR } = makePersonMesh(shirt);
-  group.position.set(x, 0, z);
-  scene.add(group);
+  const shirt = SHIRT_COLORS[Math.floor(rng() * SHIRT_COLORS.length)];
+  const skin = SKIN_TONES[Math.floor(rng() * SKIN_TONES.length)];
+  const parts = makePersonMesh(shirt, skin);
+  parts.group.position.set(x, 0, z);
+  scene.add(parts.group);
   return {
     kind,
-    mesh: group, legL, legR, armL, armR,
+    mesh: parts.group,
+    legL: parts.legL,
+    legR: parts.legR,
+    armL: parts.armL,
+    armR: parts.armR,
     pos: new THREE.Vector3(x, 0, z),
     yaw: rng() * Math.PI * 2,
     speed: 0,
@@ -51,54 +66,30 @@ export function spawnPed(scene, x, z, rng, kind = 'walker') {
     alive: true,
     fleeing: false,
     fleeTimer: 0,
+    state: 'pause', // pause | stroll | flee
   };
 }
 
-// Pick a sidewalk corner: an intersection offset by ~11m onto the pavement.
+// A point on the pavement near a random corner: intersection plus an
+// offset that lands on the sidewalk strip, never in the road.
 export function randomSidewalkPoint(centers, rng) {
   const cx = centers[Math.floor(rng() * centers.length)];
   const cz = centers[Math.floor(rng() * centers.length)];
   const off = 11 + rng() * 2;
-  const sx = (rng() < 0.5 ? -1 : 1) * off;
-  const sz = (rng() < 0.5 ? -1 : 1) * off;
-  return { x: cx + sx, z: cz + sz };
+  return {
+    x: cx + (rng() < 0.5 ? -off : off),
+    z: cz + (rng() < 0.5 ? -off : off),
+  };
 }
 
-export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
-  if (!ped.alive) return;
-  // flee from recent danger (gunfire / speeding car)
-  if (dangerPos) {
-    const d = Math.hypot(ped.pos.x - dangerPos.x, ped.pos.z - dangerPos.z);
-    if (d < 18) { ped.fleeing = true; ped.fleeTimer = 3; }
-  }
-  if (ped.fleeTimer > 0) {
-    ped.fleeTimer -= dt;
-    if (ped.fleeTimer <= 0) ped.fleeing = false;
-  }
-  if (ped.waitTimer > 0) {
-    ped.waitTimer -= dt;
-    ped.speed = 0;
-  } else {
-    if (!ped.target) ped.target = randomSidewalkPoint(centers, rng);
-    const dx = ped.target.x - ped.pos.x;
-    const dz = ped.target.z - ped.pos.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 1.5) {
-      ped.target = null;
-      ped.waitTimer = 1 + rng() * 4;
-      ped.speed = 0;
-    } else {
-      const wantYaw = Math.atan2(dx, dz);
-      let dy = wantYaw - ped.yaw;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      ped.yaw += Math.max(-3 * dt, Math.min(3 * dt, dy));
-      const targetSpeed = ped.fleeing ? 4.6 : TRAFFIC.pedSpeed;
-      ped.speed += (targetSpeed - ped.speed) * Math.min(1, dt * 3);
-      ped.pos.x += Math.sin(ped.yaw) * ped.speed * dt;
-      ped.pos.z += Math.cos(ped.yaw) * ped.speed * dt;
-    }
-  }
+function turnToward(ped, wantYaw, maxTurn, dt) {
+  let d = wantYaw - ped.yaw;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  ped.yaw += Math.max(-maxTurn * dt, Math.min(maxTurn * dt, d));
+}
+
+function animateWalk(ped, dt) {
   ped.walkPhase += dt * (2 + ped.speed * 2.4);
   const swing = Math.sin(ped.walkPhase) * 0.45 * Math.min(1, ped.speed / 2);
   ped.legL.rotation.x = swing;
@@ -109,7 +100,63 @@ export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
   ped.mesh.rotation.y = ped.yaw;
 }
 
-// A ped that was shot falls over and fades; returns true while animating.
+// Walker brain. Danger (a shot's end point, a body, a fast car) flips the
+// state to flee for a few seconds; fleeing means sprinting away from the
+// danger point, not toward a target. Otherwise: pause, pick a corner,
+// stroll to it, repeat.
+export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
+  if (!ped.alive) return;
+
+  if (dangerPos) {
+    const d = Math.hypot(ped.pos.x - dangerPos.x, ped.pos.z - dangerPos.z);
+    if (d < 18) {
+      ped.state = 'flee';
+      ped.fleeTimer = 3;
+      ped.fleeFrom = { x: dangerPos.x, z: dangerPos.z };
+    }
+  }
+  ped.fleeing = ped.state === 'flee';
+
+  if (ped.state === 'flee') {
+    ped.fleeTimer -= dt;
+    const away = Math.atan2(ped.pos.x - ped.fleeFrom.x, ped.pos.z - ped.fleeFrom.z);
+    turnToward(ped, away, 4, dt);
+    ped.speed += (4.6 - ped.speed) * Math.min(1, dt * 3);
+    ped.pos.x += Math.sin(ped.yaw) * ped.speed * dt;
+    ped.pos.z += Math.cos(ped.yaw) * ped.speed * dt;
+    if (ped.fleeTimer <= 0) {
+      ped.state = 'pause';
+      ped.waitTimer = 0.5 + rng() * 1.5;
+      ped.target = null;
+    }
+  } else if (ped.state === 'pause') {
+    ped.speed = 0;
+    ped.waitTimer -= dt;
+    if (ped.waitTimer <= 0) {
+      ped.target = randomSidewalkPoint(centers, rng);
+      ped.state = 'stroll';
+    }
+  } else {
+    // stroll
+    if (!ped.target) ped.target = randomSidewalkPoint(centers, rng);
+    const dx = ped.target.x - ped.pos.x;
+    const dz = ped.target.z - ped.pos.z;
+    if (Math.hypot(dx, dz) < 1.5) {
+      ped.target = null;
+      ped.state = 'pause';
+      ped.waitTimer = 1 + rng() * 4;
+      ped.speed = 0;
+    } else {
+      turnToward(ped, Math.atan2(dx, dz), 3, dt);
+      ped.speed += (TRAFFIC.pedSpeed - ped.speed) * Math.min(1, dt * 3);
+      ped.pos.x += Math.sin(ped.yaw) * ped.speed * dt;
+      ped.pos.z += Math.cos(ped.yaw) * ped.speed * dt;
+    }
+  }
+  animateWalk(ped, dt);
+}
+
+// A fallen ped tips over and stays down. Returns true while animating.
 export function updateFallenPed(ped, dt) {
   if (ped.alive) return false;
   ped.mesh.rotation.x += (Math.PI / 2 - ped.mesh.rotation.x) * Math.min(1, dt * 6);

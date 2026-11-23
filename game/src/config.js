@@ -1,53 +1,86 @@
-// ZENITH — config.js
-// One job: every tunable number, colour and story string in one place so the
-// rest of the game reads like a design document, not a pile of magic numbers.
-// All names, places and people here are original fiction.
+// ZENITH — config.js (fresh rewrite, round 3)
+// Every number the rest of the game argues about lives here: the shape of
+// the town, how a car feels, what a crime costs, what the sky looks like.
+// The other modules import these tables and never invent their own tuning,
+// so balancing the whole game means editing this one file.
+
 export const GAME_TITLE = 'ZENITH';
 export const GAME_SUBTITLE = 'An open-world crime story in the mountain town of Zenith';
-export const SAVE_KEY = 'zenith-save-v1';
+export const SAVE_KEY = 'zenith-save-v2';
 
-// City layout: a 6 x 6 grid of blocks. Streets run on the grid lines.
-export const CITY = {
-  blocks: 6,          // blocks per side
-  block: 70,          // block pitch (metres)
-  streetWidth: 16,    // road width
-  half: 210,          // city spans -half .. +half on both axes
-  beachX: 226,        // edge feature starts here (east edge)
-  waterX: 262,        // far edge feature starts here
-  boundX: 288,        // hard world bound east (in the edge feature)
-  boundZ: 228,
+// ---------------------------------------------------------------- the town
+// The street grid: BLOCKS_PER_SIDE squares of BLOCK_PITCH metres, roads on
+// the grid lines, buildings inside the squares. The built-up area spans
+// -half..+half on both axes; east of it the ridge road climbs past the
+// observatory toward the valley haze, which is where the world ends.
+const BLOCKS_PER_SIDE = 6;
+const BLOCK_PITCH = 70;
+const GRID_HALF = (BLOCKS_PER_SIDE * BLOCK_PITCH) / 2; // 210
+
+export const CITY = Object.freeze({
+  blocks: BLOCKS_PER_SIDE,
+  block: BLOCK_PITCH,
+  streetWidth: 16,
+  half: GRID_HALF,
+  beachX: GRID_HALF + 16,   // ridge rock shelf begins (east edge)
+  waterX: GRID_HALF + 52,   // violet valley haze begins
+  boundX: GRID_HALF + 78,   // hard eastern bound, out on the shelf
+  boundZ: GRID_HALF + 18,   // hard bound on the other three sides
   fogNear: 120,
   fogFar: 380,
   sunIntensity: 1.9,
-};
+});
 
-// Mission hub: the fixer's base. Missions start here, the story ends here.
-export const HUB = { x: -186, z: -168 };
-export const HUB_NAME = "Ridge Lodge";
-export const PD_NAME = "Ridge PD";
-export const RADIO_NAME = "SUMMIT FM 94.7";
-export const COMPLETE_TITLE = "QUEEN OF THE RIDGE";
-export const BUSTED_TEXT = "The Ridge PD caught you. They took $100 for the trouble and dropped you at the lodge.";
-export const WASTED_TEXT = "Ridge Clinic patched you up. The bill was $100 \u2014 and the heat is off, for now.";
-export const CLOCK_START = 1145; // in-game clock start, minutes
+// ---------------------------------------------------------------- the story
+// Ridge Lodge is where every job starts and where the story ends.
+export const HUB = Object.freeze({ x: -186, z: -168 });
+export const HUB_NAME = 'Ridge Lodge';
+export const PD_NAME = 'Ridge PD';
+export const RADIO_NAME = 'SUMMIT FM 94.7';
+export const COMPLETE_TITLE = 'QUEEN OF THE RIDGE';
+export const BUSTED_TEXT =
+  'The Ridge PD finally boxed you in. A $100 fine, a long walk back, and they dropped you at the lodge.';
+export const WASTED_TEXT =
+  'Ridge Clinic stitched you back together for $100. The good news: nobody is looking for you anymore.';
+export const CLOCK_START = 1145; // minutes after midnight when a fresh game opens
 
-// The one mechanic that makes this city drive differently from any other:
-// RIDGE ICE: the east ridge road (past the observatory) is slick — steering bites late, slides last longer.
-export const MECHANIC = { type: "ice", blurb: "RIDGE ICE: the east ridge road (past the observatory) is slick \u2014 steering bites late, slides last longer." };
+export const STORY = Object.freeze({
+  hero: 'Nadia Kaur',
+  fixer: 'Professor Alden Vark',
+  intro:
+    'Nadia Kaur rolled into Zenith with a dying rover and a debt she could not outrun. ' +
+    'Professor Alden Vark, who runs the observatory lodge up on Ridge Road, offered her a way out: ' +
+    'five jobs, no questions, cash on completion. Drive clean, steal smarter, and stay ahead of the ' +
+    'Ridge PD — their stars do not come off easy.',
+  outro:
+    'The last crate is delivered, the debt is settled, and the ridge road is quiet behind you. ' +
+    'Zenith belongs to the driver who never got caught. QUEEN OF THE RIDGE.',
+});
 
-// Player / on-foot tuning
-export const PLAYER = {
+// The one road that drives like no other road in town: past the observatory
+// the ridge shelf is polished rock and morning ice, so the wheel answers
+// late and every slide lasts a breath longer.
+export const MECHANIC = Object.freeze({
+  type: 'ice',
+  blurb:
+    'RIDGE ICE: the east ridge road (past the observatory) is slick — steering bites late, slides last longer.',
+});
+
+// ---------------------------------------------------------------- the hero
+export const PLAYER = Object.freeze({
   walkSpeed: 6,
   runSpeed: 11,
   radius: 0.6,
   height: 1.8,
   eyeHeight: 1.62,
   maxHp: 100,
-  jumpSpeed: 0,
-};
+  jumpSpeed: 0, // Zenith is a driving town; feet stay on the ground
+});
 
-// Car tuning (arcade, not a sim: fun first)
-export const CAR = {
+// ---------------------------------------------------------------- the cars
+// Arcade numbers, tuned for fun over realism: strong brakes, forgiving grip,
+// a handbrake that actually rotates the car.
+export const CAR = Object.freeze({
   accel: 22,
   brake: 34,
   reverseMax: 12,
@@ -56,31 +89,33 @@ export const CAR = {
   grip: 6.5,
   handbrakeTurn: 3.1,
   radius: 1.5,
-};
+});
 
-// Traffic + pedestrians
-export const TRAFFIC = {
+// Ambient population: how many cars cruise and how many people walk.
+export const TRAFFIC = Object.freeze({
   carCount: 10,
   carSpeed: 9,
   pedCount: 16,
   pedSpeed: 1.6,
-};
+});
 
-// Wanted system
-export const WANTED = {
+// ---------------------------------------------------------------- the law
+// Heat is priced per crime; stars cool down only after a quiet stretch
+// with no cruiser close enough to see you.
+export const WANTED = Object.freeze({
   max: 5,
-  decaySeconds: 26,       // quiet seconds before one star drops
-  bustDistance: 3.2,      // cop must be this close, on foot, to bust
-  bustSeconds: 1.6,       // seconds of contact before the bust lands
+  decaySeconds: 26,
+  bustDistance: 3.2, // a stopped cruiser this close, while you are on foot…
+  bustSeconds: 1.6,  // …for this long, and the cuffs come out
   heatStealCar: 1,
   heatHitPed: 1,
   heatShoot: 1,
   heatKillCop: 2,
   heatRamCop: 1,
-};
+});
 
-// Combat
-export const COMBAT = {
+// ---------------------------------------------------------------- the gun
+export const COMBAT = Object.freeze({
   magSize: 12,
   reloadSeconds: 1.4,
   range: 90,
@@ -89,10 +124,11 @@ export const COMBAT = {
   pedHp: 50,
   copHp: 80,
   rivalHp: 100,
-};
+});
 
-// Palette
-export const PALETTE = {
+// ---------------------------------------------------------------- the look
+// Dusk over the ridge: violet sky, warm sun, pastel towers.
+export const PALETTE = Object.freeze({
   sky: 0x8a7fc0,
   fog: 0x7a6fa8,
   sun: 0xffd9a0,
@@ -100,36 +136,36 @@ export const PALETTE = {
   sidewalk: 0x8a8a96,
   sand: 0x6a6a72,
   sea: 0x8a7fb8,
-  building: [0x8a86a8, 0x6a7a9a, 0xb8a88a, 0x9a8ab8, 0xd8d8e0, 0x7a6a8a, 0xc8b8a8, 0x5a5a6a],
+  building: Object.freeze([
+    0x8a86a8, 0x6a7a9a, 0xb8a88a, 0x9a8ab8,
+    0xd8d8e0, 0x7a6a8a, 0xc8b8a8, 0x5a5a6a,
+  ]),
   glass: 0x4a5a7a,
   palmTrunk: 0x5a4632,
   palmLeaf: 0x2a6a3a,
-  carPaint: [0x8a7fc0, 0x2e6fc2, 0xe8c23a, 0x3aa88a, 0xc23b2e, 0xe8e8e8, 0x222831, 0xd97a2b],
+  carPaint: Object.freeze([
+    0x8a7fc0, 0x2e6fc2, 0xe8c23a, 0x3aa88a,
+    0xc23b2e, 0xe8e8e8, 0x222831, 0xd97a2b,
+  ]),
   ground: 0x5a5e52,
   hemiSky: 0x9a8ac8,
   hemiGround: 0x4a4448,
-  minimapSea: "#8a7fb8",
-  minimapSand: "#6a6a72",
-};
+  minimapSea: '#8a7fb8',
+  minimapSand: '#6a6a72',
+});
 
-// Story: Nadia Kaur, a driver new to town, owes fixer Professor Alden Vark.
-export const STORY = {
-  hero: "Nadia Kaur",
-  fixer: "Professor Alden Vark",
-  intro: "You are Nadia Kaur, a getaway driver who just rolled into Zenith with a busted rover and a debt to Professor Alden Vark, who runs the observatory lodge on Ridge Road. Pay him back job by job \u2014 drive, steal, run \u2014 and earn your place as the best driver on the mountain. Watch the stars: the Ridge PD does not forgive.",
-  outro: "The ridge road fades behind you, $1,500 richer and finally square with Vark. Zenith is yours now, Nadia \u2014 every street, every car, every getaway. QUEEN OF THE RIDGE.",
-};
-
-// Controls shown on the start screen and pause menu
-export const CONTROLS = [
+// ---------------------------------------------------------------- the keys
+// Shown verbatim on the start screen; keep in step with main.js.
+export const CONTROLS = Object.freeze([
   ['W A S D', 'Move / drive'],
   ['Mouse', 'Look around (click to lock)'],
   ['Shift', 'Sprint / NITRO boost (in car)'],
   ['E', 'Enter / exit / steal a car'],
+  ['F', 'Horn (in car) — scatters pedestrians'],
   ['Space', 'Handbrake (in car)'],
   ['Click', 'Fire pistol'],
   ['R', 'Reload'],
   ['M', 'Toggle mission details'],
   ['P / Esc', 'Pause'],
   ['H', 'Toggle radio'],
-];
+]);

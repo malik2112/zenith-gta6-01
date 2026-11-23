@@ -1,0 +1,1 @@
+{"description":"ZENITH — an original open-world crime game for make.fun's gta6-01 bounty. Plain static files; no build step, no dependencies.","engines":{"node":">=22.18"},"license":"MIT","name":"zenith-gta6-01","private":true,"scripts":{"handin":"node main.ts","serve":"node serve.ts"},"type":"module","version":"3.0.0"}

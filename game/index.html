@@ -6,85 +6,84 @@
 <title>ZENITH — Open-World Crime</title>
 <style>
   :root{
-    --bg:#10141a; --panel:rgba(13,18,25,.82); --line:#2b3644; --ink:#eef2f6; --dim:#93a3b5;
-    --gold:#ffd23a; --orange:#ff9a2a; --cyan:#39c6ff; --red:#ff5346; --green:#69e08a;
-    --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --bg:#0d1017; --panel:rgba(10,14,22,.78); --edge:#39465c; --ink:#f2f5f9; --faint:#9fb0c3;
+    --gold:#ffd23a; --amber:#ff9a2a; --sky:#39c6ff; --alarm:#ff5346; --ok:#69e08a;
+    --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--font)}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans)}
   #game,#game canvas{position:fixed;inset:0;display:block}
   #hud{position:fixed;inset:0;pointer-events:none;display:none}
   #flash{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .12s}
-  #flash.on.damage{background:radial-gradient(ellipse at center, transparent 55%, rgba(255,40,30,.45))}
-  #flash.on.bust{background:rgba(60,80,255,.18)}
-  #flash.on.good{background:radial-gradient(ellipse at center, transparent 60%, rgba(80,255,140,.25))}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px}
-  /* top-left: cash + health */
+  #flash.on.damage{background:radial-gradient(ellipse at center, transparent 52%, rgba(255,40,30,.5))}
+  #flash.on.bust{background:rgba(60,80,255,.2)}
+  #flash.on.good{background:radial-gradient(ellipse at center, transparent 58%, rgba(80,255,140,.28))}
+  .panel{background:var(--panel);border:1px solid var(--edge);border-radius:8px;backdrop-filter:blur(3px)}
+  /* top-left cluster: money, health, feed */
   #topleft{position:fixed;left:16px;top:12px;display:flex;flex-direction:column;gap:8px}
-  #cash{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--gold);padding:6px 14px}
+  #cash{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--gold);padding:6px 14px;letter-spacing:.02em}
   #hpwrap{display:flex;align-items:center;gap:8px;padding:6px 12px;font-family:var(--mono)}
-  #hpwrap .lbl{font-size:11px;color:var(--dim);letter-spacing:.14em}
-  #hpnum{font-size:20px;font-weight:700}
+  #hpwrap .lbl{font-size:11px;color:var(--faint);letter-spacing:.16em}
+  #hpnum{font-size:20px;font-weight:700;min-width:2ch}
   #hpbar{width:130px;height:8px;background:#26313d;border-radius:4px;overflow:hidden}
-  #hpfill{height:100%;background:var(--green);width:100%}
+  #hpfill{height:100%;background:var(--ok);width:100%;transition:width .2s}
   #feed{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:12px;max-width:360px}
-  #feed div{padding:4px 9px;border-radius:4px;background:var(--panel);border:1px solid var(--line)}
-  #feed div.bad{border-left:3px solid var(--red);color:#ffb3ad}
-  #feed div.good{border-left:3px solid var(--green);color:#c8f5d6}
+  #feed div{padding:4px 9px;border-radius:4px;background:var(--panel);border:1px solid var(--edge)}
+  #feed div.bad{border-left:3px solid var(--alarm);color:#ffb3ad}
+  #feed div.good{border-left:3px solid var(--ok);color:#c8f5d6}
   #feed div.mission{border-left:3px solid var(--gold);color:#ffe9a8}
-  #feed div.info{color:var(--dim)}
+  #feed div.info{color:var(--faint)}
   /* top-centre: clock + radio */
   #topmid{position:fixed;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center}
   #clock{font-family:var(--mono);font-size:17px;padding:6px 12px}
-  #radio{font-family:var(--mono);font-size:12px;color:var(--cyan);padding:6px 12px}
-  /* top-right: wanted stars + minimap */
+  #radio{font-family:var(--mono);font-size:12px;color:var(--sky);padding:6px 12px}
+  /* top-right: stars, minimap, place name */
   #topright{position:fixed;right:16px;top:12px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-  #stars{font-size:26px;letter-spacing:4px;padding:4px 12px}
+  #stars{font-size:26px;letter-spacing:4px;padding:4px 12px;line-height:1.2}
   #stars .star{color:#3a4552}
-  #stars .star.on{color:var(--gold);text-shadow:0 0 10px rgba(255,210,58,.8)}
-  #minimap{border:1px solid var(--line);border-radius:6px;background:rgba(13,18,25,.82)}
-  #loc{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.12em;text-align:right}
-  /* bottom-left: mission objective */
+  #stars .star.on{color:var(--gold);text-shadow:0 0 10px rgba(255,210,58,.85)}
+  #minimap{border:1px solid var(--edge);border-radius:8px;background:rgba(10,14,22,.82)}
+  #loc{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.14em;text-align:right}
+  /* bottom-left: current objective */
   #objective{position:fixed;left:16px;bottom:18px;max-width:430px;padding:10px 14px;font-size:14px;line-height:1.45}
-  #objective b{display:block;font-size:11px;letter-spacing:.16em;color:var(--gold);margin-bottom:3px}
-  /* bottom-right: speed + ammo */
+  #objective b{display:block;font-size:11px;letter-spacing:.18em;color:var(--gold);margin-bottom:3px}
+  /* bottom-right: speedo, ammo, boost */
   #botright{position:fixed;right:16px;bottom:18px;text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
   #speed{font-family:var(--mono);font-size:44px;line-height:1;font-weight:700}
-  #speedlabel{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.16em}
-  #ammo{font-family:var(--mono);font-size:14px;color:var(--dim);padding:5px 10px}
-  /* centre hints */
-  #hint{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);font-family:var(--mono);font-size:14px;padding:8px 16px;opacity:0;transition:opacity .3s;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+  #speedlabel{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.18em}
+  #ammo{font-family:var(--mono);font-size:14px;color:var(--faint);padding:5px 10px}
+  #boostwrap{padding:6px 10px;opacity:0;transition:opacity .3s}
+  #boostbar{width:150px;height:8px;background:#26313d;border-radius:4px;overflow:hidden}
+  #boostfill{height:100%;background:var(--amber);width:100%}
+  /* centre overlays on the HUD */
+  #hint{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);font-family:var(--mono);font-size:14px;padding:8px 16px;opacity:0;transition:opacity .3s;background:var(--panel);border:1px solid var(--edge);border-radius:8px;white-space:nowrap}
   #crosshair{position:fixed;left:50%;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);display:none}
   #crosshair i{position:absolute;background:var(--ink);opacity:.9}
   #crosshair i:nth-child(1){left:9px;top:0;width:2px;height:6px}
   #crosshair i:nth-child(2){left:9px;bottom:0;width:2px;height:6px}
   #crosshair i:nth-child(3){top:9px;left:0;height:2px;width:6px}
   #crosshair i:nth-child(4){top:9px;right:0;height:2px;width:6px}
-  #bustbar{position:fixed;left:50%;top:22%;transform:translateX(-50%);font-family:var(--mono);font-size:22px;color:#9ab4ff;opacity:0;letter-spacing:.2em}
-  /* mission briefing card */
+  #bustbar{position:fixed;left:50%;top:22%;transform:translateX(-50%);font-family:var(--mono);font-size:22px;color:#9ab4ff;opacity:0;letter-spacing:.22em;transition:opacity .15s}
   #briefing{position:fixed;left:50%;top:70px;transform:translateX(-50%);width:min(560px,92vw);padding:16px 20px;display:none}
   #briefing.show{display:block}
   #brief-title{font-size:16px;color:var(--gold);letter-spacing:.06em;margin-bottom:6px}
-  #brief-text{font-size:14px;line-height:1.5;color:var(--ink)}
-  /* overlays */
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(8,12,18,.72);z-index:10}
-  #menu{background:linear-gradient(180deg, rgba(8,12,18,.55), rgba(8,12,18,.85));flex-direction:column;text-align:center;padding:20px}
-  #menu h1{font-size:min(72px,11vw);margin:0;letter-spacing:.06em;color:var(--gold);text-shadow:0 4px 30px rgba(255,150,40,.5)}
-  #menu-sub{font-size:17px;color:var(--cyan);letter-spacing:.14em;margin:6px 0 14px}
-  #menu-story{max-width:640px;font-size:15px;line-height:1.6;color:#d5dde6;margin:0 0 18px}
-  #controls{display:grid;grid-template-columns:repeat(2,minmax(180px,260px));gap:4px 22px;text-align:left;font-size:13px;color:var(--dim);margin-bottom:20px}
+  #brief-text{font-size:14px;line-height:1.55;color:var(--ink)}
+  /* full-screen menus */
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(6,9,15,.74);z-index:10}
+  #menu{background:linear-gradient(180deg, rgba(6,9,15,.5), rgba(6,9,15,.88));flex-direction:column;text-align:center;padding:20px}
+  #menu h1{font-size:min(72px,11vw);margin:0;letter-spacing:.08em;color:var(--gold);text-shadow:0 4px 30px rgba(255,150,40,.5)}
+  #menu-sub{font-size:17px;color:var(--sky);letter-spacing:.16em;margin:6px 0 14px}
+  #menu-story{max-width:640px;font-size:15px;line-height:1.65;color:#d5dde6;margin:0 0 18px}
+  #controls{display:grid;grid-template-columns:repeat(2,minmax(180px,260px));gap:4px 22px;text-align:left;font-size:13px;color:var(--faint);margin-bottom:20px}
   #controls b{display:inline-block;min-width:92px;color:var(--ink);font-family:var(--mono);font-weight:600}
-  .btn{pointer-events:auto;cursor:pointer;font-family:var(--mono);font-size:16px;padding:12px 28px;border-radius:6px;border:1px solid var(--gold);background:var(--gold);color:#191408;font-weight:700;margin:4px}
+  .btn{pointer-events:auto;cursor:pointer;font-family:var(--mono);font-size:16px;padding:12px 28px;border-radius:8px;border:1px solid var(--gold);background:var(--gold);color:#191408;font-weight:700;margin:4px}
   .btn.ghost{background:transparent;color:var(--gold)}
-  .btn:hover{filter:brightness(1.1)}
+  .btn:hover{filter:brightness(1.12)}
   #pausemenu,#endscreen{display:none;flex-direction:column;text-align:center}
-  #pausemenu h2,#endscreen h2{font-size:40px;margin:0 0 8px;color:var(--gold);letter-spacing:.05em}
-  #pausemenu p,#endscreen p{max-width:520px;color:#d5dde6;line-height:1.6}
+  #pausemenu h2,#endscreen h2{font-size:40px;margin:0 0 8px;color:var(--gold);letter-spacing:.06em}
+  #pausemenu p,#endscreen p{max-width:520px;color:#d5dde6;line-height:1.65}
   #endscreen h2{font-size:52px}
-  #boostwrap{padding:6px 10px;opacity:0;transition:opacity .3s}
-  #boostbar{width:150px;height:8px;background:#26313d;border-radius:4px;overflow:hidden}
-  #boostfill{height:100%;background:var(--orange);width:100%}
   #selftest{position:fixed;left:8px;bottom:8px;z-index:50;font-family:var(--mono);font-size:12px;color:#8affa8;background:rgba(0,0,0,.6);padding:6px;max-width:60vw}
 </style>
 </head>
@@ -132,7 +131,7 @@
     <button id="btn-start" class="btn">START NEW GAME</button>
     <button id="btn-continue" class="btn ghost" style="display:none">CONTINUE</button>
   </div>
-  <p style="font-size:12px;color:var(--dim);margin-top:14px">An original open-world crime game. All places, people and cars are fiction — no part of any commercial game is used. Progress saves locally.</p>
+  <p style="font-size:12px;color:var(--faint);margin-top:14px">An original open-world crime game. All places, people and cars are fiction — no part of any commercial game is used. Progress saves locally.</p>
 </div>
 
 <div id="pausemenu" class="overlay">

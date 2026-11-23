@@ -1,18 +1,70 @@
-// SOLMAR BAY — wanted.js
-// One job: the wanted system. Crimes add heat, stars rise, the ZENITH
-// PD dispatches cruisers that chase and ram, and a long quiet stretch (or a
-// clean getaway) cools the heat back down. Busted on foot, wrecked in a car.
+// ZENITH — wanted.js (fresh rewrite, round 3)
+// Heat, stars, and the Ridge PD. Crimes price themselves in stars; the
+// department answers with as many cruisers as the level warrants,
+// spawning them on real roads a sensible distance away. Stars cool one
+// at a time after a quiet stretch with nobody close enough to see you.
+// On foot, a stopped cruiser parked against you for long enough is a bust.
 import { WANTED } from './config.js';
 import { spawnCar, updatePoliceCar, spinWheels } from './vehicles.js';
 
 export function createWanted() {
   return {
     level: 0,
-    quietTimer: 0,     // seconds since the last crime
-    bustTimer: 0,      // contact time with a cop while on foot
-    police: [],        // police car objects
+    quietTimer: 0,
+    bustTimer: 0,
+    police: [],
     sirenOn: false,
   };
+}
+
+// Cruisers on the street per star: 1 star → 2 cars, capped at 4.
+function cruisersForLevel(level) {
+  return level <= 0 ? 0 : Math.min(1 + level, 4);
+}
+
+// Pick a road node 70–110 m from the player to dispatch a cruiser from,
+// so it arrives driving on a street instead of materialising in a wall.
+function dispatchPoint(G) {
+  const p = G.player.pos;
+  const nodes = G.city && G.city.nodes ? G.city.nodes : [];
+  let best = null;
+  let bestScore = Infinity;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - p.x, n.z - p.z);
+    const score = Math.abs(d - 90) + Math.random() * 25;
+    if (d > 45 && score < bestScore) {
+      bestScore = score;
+      best = n;
+    }
+  }
+  if (best) return best;
+  const ang = Math.random() * Math.PI * 2;
+  return {
+    x: Math.max(-200, Math.min(200, p.x + Math.cos(ang) * 90)),
+    z: Math.max(-200, Math.min(200, p.z + Math.sin(ang) * 90)),
+  };
+}
+
+export function syncPolice(G) {
+  const w = G.wanted;
+  const want = cruisersForLevel(w.level);
+  while (w.police.length < want) {
+    const at = dispatchPoint(G);
+    const car = spawnCar(G.scene, at.x, at.z, Math.random() * Math.PI * 2, 0x14181c, 'police');
+    w.police.push(car);
+    G.cars.push(car);
+  }
+  while (w.police.length > want) {
+    const car = w.police.pop();
+    car.alive = false;
+    G.scene.remove(car.mesh);
+    const i = G.cars.indexOf(car);
+    if (i >= 0) G.cars.splice(i, 1);
+  }
+  if (w.level === 0 && w.sirenOn) {
+    G.sound.sirenStop();
+    w.sirenOn = false;
+  }
 }
 
 export function addHeat(G, amount, reason) {
@@ -28,110 +80,88 @@ export function addHeat(G, amount, reason) {
   syncPolice(G);
 }
 
-// How many cruisers the current level wants on the street.
-function desiredCruisers(level) {
-  return level <= 0 ? 0 : Math.min(1 + level, 4);
-}
-
-export function syncPolice(G) {
-  const w = G.wanted;
-  const want = desiredCruisers(w.level);
-  // spawn missing cruisers at a road edge away from the player
-  while (w.police.length < want) {
-    const p = G.player.pos;
-    const ang = Math.random() * Math.PI * 2;
-    const dist = 70 + Math.random() * 40;
-    const x = Math.max(-200, Math.min(200, p.x + Math.cos(ang) * dist));
-    const z = Math.max(-200, Math.min(200, p.z + Math.sin(ang) * dist));
-    const car = spawnCar(G.scene, x, z, Math.random() * Math.PI * 2, 0x14181c, 'police');
-    // police livery: white doors on a black body
-    car.mesh.children[0].material = car.mesh.children[0].material.clone();
-    w.police.push(car);
-    G.cars.push(car);
-  }
-  // retire extras when the heat drops
-  while (w.police.length > want) {
-    const car = w.police.pop();
-    car.alive = false;
-    G.scene.remove(car.mesh);
-    const i = G.cars.indexOf(car);
-    if (i >= 0) G.cars.splice(i, 1);
-  }
-  if (w.level === 0 && w.sirenOn) {
-    G.sound.sirenStop();
-    w.sirenOn = false;
-  }
-}
-
 export function updateWanted(G, dt) {
   const w = G.wanted;
   if (w.level === 0) return;
   w.quietTimer += dt;
-  // cool down: quiet + no cruiser close = one star drops
-  let nearest = 1e9;
+
+  // Cooling: quiet long enough, and the nearest cruiser far enough away.
+  let nearest = Infinity;
   for (const c of w.police) {
-    const d = Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z);
-    if (d < nearest) nearest = d;
+    nearest = Math.min(nearest, Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z));
   }
   if (w.quietTimer > WANTED.decaySeconds && nearest > 55) {
     w.level -= 1;
     w.quietTimer = 0;
-    G.hudMessage(w.level > 0 ? `Heat cooling… wanted level ${w.level}` : 'You lost them. Heat is off.', 'good');
+    G.hudMessage(
+      w.level > 0 ? `Heat cooling… wanted level ${w.level}` : 'You lost them. Heat is off.',
+      'good',
+    );
     syncPolice(G);
   }
-  // busted: on foot, a cruiser parked on top of you
-  if (G.player.onFoot) {
-    let touching = false;
-    for (const c of w.police) {
-      const d = Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z);
-      if (d < WANTED.bustDistance && Math.abs(c.speed) < 4) touching = true;
-    }
-    if (touching) {
-      w.bustTimer += dt;
-      G.hudFlash('bust');
-      if (w.bustTimer >= WANTED.bustSeconds) {
-        w.bustTimer = 0;
-        G.busted();
-      }
-    } else {
-      w.bustTimer = Math.max(0, w.bustTimer - dt * 2);
+
+  // Busted: on foot with a slow cruiser right on top of you.
+  if (!G.player.onFoot) {
+    w.bustTimer = 0;
+    return;
+  }
+  const pinned = w.police.some(
+    (c) =>
+      Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z) < WANTED.bustDistance &&
+      Math.abs(c.speed) < 4,
+  );
+  if (pinned) {
+    w.bustTimer += dt;
+    G.hudFlash('bust');
+    if (w.bustTimer >= WANTED.bustSeconds) {
+      w.bustTimer = 0;
+      G.busted();
     }
   } else {
-    w.bustTimer = 0;
+    w.bustTimer = Math.max(0, w.bustTimer - dt * 2);
   }
+}
+
+// A cruiser shoving Nadia on foot: knock her sideways, small damage.
+function shovePlayer(G, cop) {
+  const dx = G.player.pos.x - cop.pos.x;
+  const dz = G.player.pos.z - cop.pos.z;
+  const d = Math.hypot(dx, dz) || 1;
+  G.player.pos.x += (dx / d) * 1.2;
+  G.player.pos.z += (dz / d) * 1.2;
+  G.player.hp = Math.max(0, G.player.hp - 4);
+  G.sound.thud();
+  if (G.player.hp <= 0) G.wasted();
 }
 
 export function updatePolice(G, dt) {
   for (const car of G.wanted.police) {
     if (!car.alive) continue;
-    // Screenshot staging: a cruiser with shotFollow holds formation beside
-    // the player (real mesh, real flashing lights) instead of chasing.
+    // Screenshot staging: a cruiser flagged shotFollow holds formation
+    // beside the player (real mesh, real lights) instead of chasing.
     if (G.shotMode && car.shotFollow) {
-      const p = G.player.car || G.player;
-      const yaw = p.yaw;
-      const { dx, dz } = car.shotFollow;
-      const sin = Math.sin(yaw), cos = Math.cos(yaw);
-      car.pos.x = p.pos.x + cos * dx + sin * dz;
-      car.pos.z = p.pos.z - sin * dx + cos * dz;
-      car.yaw = yaw;
-      car.speed = p.speed || 0;
+      const anchor = G.player.car || G.player;
+      const sin = Math.sin(anchor.yaw);
+      const cos = Math.cos(anchor.yaw);
+      car.pos.x = anchor.pos.x + cos * car.shotFollow.dx + sin * car.shotFollow.dz;
+      car.pos.z = anchor.pos.z - sin * car.shotFollow.dx + cos * car.shotFollow.dz;
+      car.yaw = anchor.yaw;
+      car.speed = anchor.speed || 0;
       car.mesh.position.copy(car.pos);
       car.mesh.rotation.y = car.yaw;
       spinWheels(car, dt);
       car.flashT += dt * 6;
       if (car.lightBar) {
-        const on = Math.sin(car.flashT) > 0;
-        car.lightBar.red.material.color.setHex(on ? 0xff2222 : 0x551111);
-        car.lightBar.blue.material.color.setHex(on ? 0x111155 : 0x2244ff);
+        const phase = Math.sin(car.flashT) > 0;
+        car.lightBar.red.material.color.setHex(phase ? 0xff2222 : 0x551111);
+        car.lightBar.blue.material.color.setHex(phase ? 0x111155 : 0x2244ff);
       }
       continue;
     }
     updatePoliceCar(car, G.player.pos, dt, G.city.colliders, G.cars, (cop) => {
-      // ramming the player
       if (G.player.onFoot) {
-        const d = Math.hypot(cop.pos.x - G.player.pos.x, cop.pos.z - G.player.pos.z);
-        if (d < 2.6) {
-          damagePlayerShove(G, cop);
+        if (Math.hypot(cop.pos.x - G.player.pos.x, cop.pos.z - G.player.pos.z) < 2.6) {
+          shovePlayer(G, cop);
         }
       } else if (G.player.car) {
         G.player.car.speed *= 0.94;
@@ -143,18 +173,6 @@ export function updatePolice(G, dt) {
       }
     });
   }
-}
-
-function damagePlayerShove(G, cop) {
-  // a cruiser nudging Nadia Kaur on foot: shove + a little damage, no instant bust
-  const dx = G.player.pos.x - cop.pos.x;
-  const dz = G.player.pos.z - cop.pos.z;
-  const d = Math.hypot(dx, dz) || 1;
-  G.player.pos.x += (dx / d) * 1.2;
-  G.player.pos.z += (dz / d) * 1.2;
-  G.player.hp = Math.max(0, G.player.hp - 4);
-  G.sound.thud();
-  if (G.player.hp <= 0) G.wasted();
 }
 
 export function clearWanted(G) {

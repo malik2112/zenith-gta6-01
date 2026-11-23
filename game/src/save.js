@@ -1,21 +1,28 @@
-// SOLMAR BAY — save.js
-// One job: persist Nadia Kaur's progress in localStorage — cash, story progress,
-// stats — and load it back. The game never needs a server to remember.
+// ZENITH — save.js (fresh rewrite, round 3)
+// Progress lives in localStorage: cash, story position, and the stats
+// the end screen brags about. One key, one JSON blob, versioned so a
+// future format can migrate instead of breaking old saves.
 import { SAVE_KEY, HUB } from './config.js';
+
+const SAVE_VERSION = 2;
+
+// Snapshot the parts of the game state worth remembering.
+function snapshot(G) {
+  return {
+    version: SAVE_VERSION,
+    cash: G.player.cash,
+    missionIndex: G.missions.index,
+    missionsDone: G.stats.missionsDone,
+    carsStolen: G.stats.carsStolen,
+    shotsFired: G.stats.shotsFired,
+    playSeconds: Math.floor(G.time),
+    savedAt: new Date().toISOString(),
+  };
+}
 
 export function saveGame(G) {
   try {
-    const data = {
-      version: 1,
-      cash: G.player.cash,
-      missionIndex: G.missions.index,
-      missionsDone: G.stats.missionsDone,
-      carsStolen: G.stats.carsStolen,
-      shotsFired: G.stats.shotsFired,
-      playSeconds: Math.floor(G.time),
-      savedAt: new Date().toISOString(),
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot(G)));
     return true;
   } catch (e) {
     return false;
@@ -27,20 +34,21 @@ export function loadSave() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
+    if (!data || data.version !== SAVE_VERSION) return null;
     return data;
   } catch (e) {
     return null;
   }
 }
 
+// Put a loaded save back into the world: money and stats restored, the
+// story resumes at the next unfinished job, Nadia back at the lodge.
 export function applySave(G, data) {
   if (!data) return false;
   G.player.cash = data.cash ?? 50;
   G.stats.missionsDone = data.missionsDone ?? 0;
   G.stats.carsStolen = data.carsStolen ?? 0;
   G.stats.shotsFired = data.shotsFired ?? 0;
-  // resume at the next uncompleted mission, back at Ridge Lodge
   G.missions.index = Math.min(data.missionIndex ?? 0, 4);
   G.missions.state = 'waiting-hub';
   G.player.pos.set(HUB.x + 6, 0, HUB.z - 18);
