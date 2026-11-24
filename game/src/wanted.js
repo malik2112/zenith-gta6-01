@@ -1,188 +1,117 @@
-// ZENITH — wanted.js (round 3 redo)
-// Heat, stars, and the Ridge PD. Crimes price themselves in stars; the
-// department answers with as many cruisers as the level warrants,
-// spawning them on real roads a sensible distance away. Stars cool one
-// at a time after a quiet stretch with nobody close enough to see you.
-// On foot, a stopped cruiser parked against you for long enough is a
-// bust. The siren's volume follows the nearest cruiser, so you can hear
-// how close the tail is.
-import { HEAT } from './config.js';
-import { summonCar, chasePolice, spinWheels } from './vehicles.js';
+// ZENITH — wanted system. Heat 0..100 maps to 0..5 stars; crimes add heat,
+// quiet time decays it. At 1+ stars police cars spawn and chase; if a police
+// car catches the player on foot, the player is busted.
+import { CONFIG } from './config.js';
 
-export function newHeat() {
-  return {
-    level: 0,
-    quietTimer: 0,
-    bustTimer: 0,
-    police: [],
-    sirenOn: false,
-  };
-}
+export class Wanted {
+  constructor(world) {
+    this.world = world;
+    this.heat = 0;
+    this.stars = 0;
+    this.quietTimer = 0;
+    this.police = [];
+    this.bustedTimer = 0;
+    this.maxPolice = 0;
+  }
 
-// Cruisers on the street per star: 1 star → 2 cars, capped at 4.
-function cruisersForLevel(level) {
-  return level <= 0 ? 0 : Math.min(1 + level, 4);
-}
+  addHeat(n) {
+    this.heat = Math.min(100, this.heat + n);
+    this.quietTimer = 0;
+    this.updateStars();
+  }
 
-// Pick a road node 70–110 m from the player to dispatch a cruiser from,
-// so it arrives driving on a street instead of materialising in a wall.
-function pickDispatch(G) {
-  const p = G.player.pos;
-  const nodes = G.city && G.city.nodes ? G.city.nodes : [];
-  let best = null;
-  let bestScore = Infinity;
-  for (const n of nodes) {
-    const d = Math.hypot(n.x - p.x, n.z - p.z);
-    const score = Math.abs(d - 90) + Math.random() * 25;
-    if (d > 45 && score < bestScore) {
-      bestScore = score;
-      best = n;
+  updateStars() {
+    const stars = Math.min(5, Math.floor(this.heat / CONFIG.heatPerStar));
+    if (stars !== this.stars) {
+      this.stars = stars;
+      this.world.hud.setStars(stars);
+      if (stars >= 2) this.world.hud.toast(`Wanted level ${stars} — lose the cops!`);
     }
-  }
-  if (best) return best;
-  const ang = Math.random() * Math.PI * 2;
-  return {
-    x: Math.max(-200, Math.min(200, p.x + Math.cos(ang) * 90)),
-    z: Math.max(-200, Math.min(200, p.z + Math.sin(ang) * 90)),
-  };
-}
-
-export function matchCruisers(G) {
-  const w = G.wanted;
-  const want = cruisersForLevel(w.level);
-  while (w.police.length < want) {
-    const at = pickDispatch(G);
-    const car = summonCar(G.scene, at.x, at.z, Math.random() * Math.PI * 2, 0x14181c, 'police');
-    w.police.push(car);
-    G.cars.push(car);
-  }
-  while (w.police.length > want) {
-    const car = w.police.pop();
-    car.alive = false;
-    G.scene.remove(car.mesh);
-    const i = G.cars.indexOf(car);
-    if (i >= 0) G.cars.splice(i, 1);
-  }
-  if (w.level === 0 && w.sirenOn) {
-    G.sound.sirenStop();
-    w.sirenOn = false;
-  }
-}
-
-export function raiseHeat(G, amount, reason) {
-  const w = G.wanted;
-  const before = w.level;
-  w.level = Math.min(HEAT.max, w.level + amount);
-  w.quietTimer = 0;
-  if (w.level > before) {
-    G.hudMessage(`WANTED LEVEL ${w.level} — ${reason}`, 'bad');
-    G.sound.sirenStart();
-    w.sirenOn = true;
-  }
-  matchCruisers(G);
-}
-
-export function tickHeat(G, dt) {
-  const w = G.wanted;
-  if (w.level === 0) return;
-  w.quietTimer += dt;
-
-  // Cooling: quiet long enough, and the nearest cruiser far enough away.
-  let nearest = Infinity;
-  for (const c of w.police) {
-    nearest = Math.min(nearest, Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z));
-  }
-  // Siren loudness tracks the tail: close is loud, far is a whisper.
-  if (w.sirenOn) G.sound.sirenSet(nearest);
-  if (w.quietTimer > HEAT.decaySeconds && nearest > 55) {
-    w.level -= 1;
-    w.quietTimer = 0;
-    G.hudMessage(
-      w.level > 0 ? `Heat cooling… wanted level ${w.level}` : 'You lost them. Heat is off.',
-      'good',
-    );
-    matchCruisers(G);
+    this.maxPolice = this.stars >= 4 ? 3 : this.stars >= 2 ? 2 : this.stars >= 1 ? 1 : 0;
   }
 
-  // Busted: on foot with a slow cruiser right on top of you.
-  if (!G.player.onFoot) {
-    w.bustTimer = 0;
-    return;
-  }
-  const pinned = w.police.some(
-    (c) =>
-      Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z) < HEAT.bustDistance &&
-      Math.abs(c.speed) < 4,
-  );
-  if (pinned) {
-    w.bustTimer += dt;
-    G.hudFlash('bust');
-    if (w.bustTimer >= HEAT.bustSeconds) {
-      w.bustTimer = 0;
-      G.busted();
-    }
-  } else {
-    w.bustTimer = Math.max(0, w.bustTimer - dt * 2);
-  }
-}
-
-// A cruiser shoving Nadia on foot: knock her sideways, small damage.
-function shovePlayer(G, cop) {
-  const dx = G.player.pos.x - cop.pos.x;
-  const dz = G.player.pos.z - cop.pos.z;
-  const d = Math.hypot(dx, dz) || 1;
-  G.player.pos.x += (dx / d) * 1.2;
-  G.player.pos.z += (dz / d) * 1.2;
-  G.player.hp = Math.max(0, G.player.hp - 4);
-  G.sound.thud();
-  if (G.player.hp <= 0) G.wasted();
-}
-
-export function tickCruisers(G, dt) {
-  for (const car of G.wanted.police) {
-    if (!car.alive) continue;
-    // Screenshot staging: a cruiser flagged shotFollow holds formation
-    // beside the player (real mesh, real lights) instead of chasing.
-    if (G.shotMode && car.shotFollow) {
-      const anchor = G.player.car || G.player;
-      const sin = Math.sin(anchor.yaw);
-      const cos = Math.cos(anchor.yaw);
-      car.pos.x = anchor.pos.x + cos * car.shotFollow.dx + sin * car.shotFollow.dz;
-      car.pos.z = anchor.pos.z - sin * car.shotFollow.dx + cos * car.shotFollow.dz;
-      car.yaw = anchor.yaw;
-      car.speed = anchor.speed || 0;
-      car.mesh.position.copy(car.pos);
-      car.mesh.rotation.y = car.yaw;
-      spinWheels(car, dt);
-      car.flashT += dt * 6;
-      if (car.lightBar) {
-        const phase = Math.sin(car.flashT) > 0;
-        car.lightBar.red.material.color.setHex(phase ? 0xff2222 : 0x551111);
-        car.lightBar.blue.material.color.setHex(phase ? 0x111155 : 0x2244ff);
+  update(dt) {
+    // Quiet time decays heat; any crime resets the quiet clock.
+    if (this.heat > 0) {
+      this.quietTimer += dt;
+      if (this.quietTimer > 8) {
+        this.heat = Math.max(0, this.heat - CONFIG.heatDecayPerSec * dt);
+        this.updateStars();
       }
-      continue;
     }
-    chasePolice(car, G.player.pos, dt, G.city.colliders, G.cars, (cop) => {
-      if (G.player.onFoot) {
-        if (Math.hypot(cop.pos.x - G.player.pos.x, cop.pos.z - G.player.pos.z) < 2.6) {
-          shovePlayer(G, cop);
-        }
-      } else if (G.player.car) {
-        G.player.car.speed *= 0.94;
-        if (Math.abs(cop.speed) > 12) {
-          G.sound.crash();
-          G.player.hp = Math.max(0, G.player.hp - 2);
-          if (G.player.hp <= 0) G.wasted();
-        }
+    const player = this.world.player;
+    // Spawn police up to the star allowance, at road points near the player.
+    while (this.police.length < this.maxPolice) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 55 + Math.random() * 25;
+      const x = player.pos.x + Math.cos(a) * d;
+      const z = player.pos.z + Math.sin(a) * d;
+      const car = this.world.vehicles.spawnPolice(x, z);
+      this.police.push(car);
+      this.world.audio.siren(true);
+    }
+    // Despawn police when the heat is gone.
+    if (this.maxPolice === 0 && this.police.length > 0) {
+      for (const car of this.police) this.world.vehicles.removeCar(car);
+      this.police = [];
+      this.world.audio.siren(false);
+    }
+    // Remove wrecked police cars.
+    for (const car of [...this.police]) {
+      if (car.health <= 0) {
+        this.world.vehicles.removeCar(car);
+        this.police = this.police.filter((c) => c !== car);
+        this.addHeat(CONFIG.heatKillCop);
       }
-    });
+    }
+    // Busted check: a police car sitting on an on-foot player.
+    if (player.onFoot && this.police.length > 0) {
+      let close = false;
+      for (const car of this.police) {
+        const d = Math.hypot(car.pos.x - player.pos.x, car.pos.z - player.pos.z);
+        if (d < 3.2) close = true;
+      }
+      if (close) {
+        this.bustedTimer += dt;
+        if (this.bustedTimer > 2) this.bust();
+      } else {
+        this.bustedTimer = 0;
+      }
+    } else {
+      this.bustedTimer = 0;
+    }
   }
-}
 
-export function coolOff(G) {
-  const w = G.wanted;
-  w.level = 0;
-  w.quietTimer = 0;
-  w.bustTimer = 0;
-  matchCruisers(G);
+  bust() {
+    const world = this.world;
+    world.money = Math.max(0, world.money - CONFIG.bustedFine);
+    world.hud.setMoney(world.money);
+    this.heat = 0;
+    this.stars = 0;
+    this.bustedTimer = 0;
+    world.hud.setStars(0);
+    for (const car of this.police) world.vehicles.removeCar(car);
+    this.police = [];
+    world.audio.siren(false);
+    const car = world.vehicles.playerCar();
+    if (car) {
+      car.driver = 'parked';
+      world.player.exitCar();
+    }
+    world.player.teleport(0, 40, Math.PI);
+    world.player.heal(CONFIG.startHealth);
+    world.state = 'busted';
+    world.hud.showBusted(CONFIG.bustedFine);
+    world.saveGame();
+  }
+
+  clear() {
+    this.heat = 0;
+    this.stars = 0;
+    this.bustedTimer = 0;
+    this.world.hud.setStars(0);
+    for (const car of this.police) this.world.vehicles.removeCar(car);
+    this.police = [];
+    this.world.audio.siren(false);
+  }
 }

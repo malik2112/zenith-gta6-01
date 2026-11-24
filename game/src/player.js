@@ -1,148 +1,151 @@
-// ZENITH — player.js (round 3 redo)
-// Nadia Kaur on foot, and the camera that watches her. Movement is
-// acceleration-based: input asks for a velocity, the body eases toward
-// it, so starting and stopping have weight instead of snapping. The
-// camera rides behind her on foot (mouse orbits it) and trails the car
-// when she drives — widening its field of view as speed builds, and
-// kicking up a touch when the pistol fires. On the menu it drifts over
-// the town on its own.
-import * as THREE from 'three';
-import { HERO, TOWN } from './config.js';
-import { pushOutOfWalls } from './city.js';
-import { buildFigure } from './pedestrians.js';
+// ZENITH — the player on foot. A low-poly walker with a jacket, jeans and a
+// cap; WASD moves relative to the camera yaw, Shift runs, E enters a car.
+import { CONFIG } from './config.js';
+import { resolveCircleCollision } from './city.js';
 
-export function makeHero(scene) {
-  const parts = buildFigure(0x8a7fc0); // the violet jacket everyone knows
-  parts.group.position.set(-180, 0, 180);
-  scene.add(parts.group);
-  return {
-    mesh: parts.group,
-    legL: parts.legL,
-    legR: parts.legR,
-    armL: parts.armL,
-    armR: parts.armR,
-    pos: new THREE.Vector3(-180, 0, 180),
-    vel: new THREE.Vector3(),
-    yaw: Math.PI * 0.75,
-    pitch: -0.12,
-    hp: HERO.maxHp,
-    cash: 50,
-    speed: 0,
-    walkPhase: 0,
-    onFoot: true,
-    car: null,
-    speedKmh: 0,
-    bustMeter: 0,
-  };
-}
+const JACKET = 0x2e6f8e;
+const SKIN = 0xd9a066;
 
-// WASD asks for a direction relative to where the camera faces; Shift
-// raises the requested speed from a walk to a run. The body turns toward
-// the direction of travel and the legs swing with the actual speed.
-export function walkHero(player, input, dt, colliders) {
-  const want = new THREE.Vector3();
-  if (input.up) want.z += 1;
-  if (input.down) want.z -= 1;
-  if (input.left) want.x -= 1;
-  if (input.right) want.x += 1;
+export class Player {
+  constructor(THREE, scene, spawn) {
+    this.THREE = THREE;
+    this.pos = new THREE.Vector3(spawn.x, 0, spawn.z);
+    this.heading = spawn.heading;
+    this.speed = 0;
+    this.health = CONFIG.startHealth;
+    this.onFoot = true;
+    this.currentCar = null;
+    this.walkPhase = 0;
 
-  const topSpeed = input.run ? HERO.runSpeed : HERO.walkSpeed;
-  if (want.lengthSq() > 0) {
-    want.normalize();
-    const sin = Math.sin(player.yaw);
-    const cos = Math.cos(player.yaw);
-    const worldX = want.z * sin + want.x * cos;
-    const worldZ = want.z * cos - want.x * sin;
-    want.set(worldX, 0, worldZ).multiplyScalar(topSpeed);
-    // Face where we are going, but not instantly.
-    const faceYaw = Math.atan2(worldX, worldZ);
-    let d = faceYaw - player.yaw;
-    while (d > Math.PI) d -= Math.PI * 2;
-    while (d < -Math.PI) d += Math.PI * 2;
-    player.yaw += d * Math.min(1, dt * 10);
-  }
-  // Ease the velocity toward the request: snappy, not teleporty.
-  const blend = Math.min(1, dt * 9);
-  player.vel.x += (want.x - player.vel.x) * blend;
-  player.vel.z += (want.z - player.vel.z) * blend;
-  player.pos.x += player.vel.x * dt;
-  player.pos.z += player.vel.z * dt;
-  player.speed = Math.hypot(player.vel.x, player.vel.z);
+    const g = new THREE.Group();
+    g.name = 'player';
 
-  pushOutOfWalls(player.pos, HERO.radius, colliders);
-  player.pos.x = Math.max(-TOWN.boundZ, Math.min(TOWN.boundX, player.pos.x));
-  player.pos.z = Math.max(-TOWN.boundZ, Math.min(TOWN.boundZ, player.pos.z));
+    const jacket = new THREE.MeshStandardMaterial({ color: JACKET, roughness: 0.85 });
+    const jeans = new THREE.MeshStandardMaterial({ color: 0x2a3242, roughness: 0.9 });
+    const skin = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.8 });
 
-  player.walkPhase += dt * (2 + player.speed * 1.6);
-  const swing = Math.sin(player.walkPhase) * 0.5 * Math.min(1, player.speed / 5);
-  player.legL.rotation.x = swing;
-  player.legR.rotation.x = -swing;
-  player.armL.rotation.x = -swing * 0.8;
-  player.armR.rotation.x = swing * 0.8;
-  player.mesh.position.copy(player.pos);
-  player.mesh.rotation.y = player.yaw;
-  player.speedKmh = Math.round(player.speed * 3.6);
-}
+    this.torso = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10), jacket);
+    this.torso.position.y = 1.05;
+    this.torso.castShadow = true;
+    g.add(this.torso);
 
-// Exponential approach helper: move `current` toward `goal` with a
-// frame-rate independent rate, so the camera feels the same at 30 or 144 Hz.
-function easeToward(current, goal, rate, dt) {
-  return current + (goal - current) * (1 - Math.exp(-rate * dt));
-}
+    this.head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
+    this.head.position.y = 1.82;
+    this.head.castShadow = true;
+    g.add(this.head);
 
-// Third-person camera. On foot the mouse orbits yaw/pitch around Nadia,
-// with a touch of recoil lift right after a shot; in a car the camera
-// chases a point behind the car, higher and further back the faster she
-// goes, always looking up the road, FOV widening with speed.
-export function trackCamera(camera, player, dt, mouseDX, mouseDY, recoil = 0) {
-  if (player.onFoot) {
-    player.yaw -= mouseDX * 0.0028;
-    player.pitch = Math.max(-0.6, Math.min(0.45, player.pitch - mouseDY * 0.0028));
-    const dist = 6.5;
-    const pitch = player.pitch + recoil;
-    const ring = Math.cos(pitch) * dist;
-    const goal = new THREE.Vector3(
-      player.pos.x - Math.sin(player.yaw) * ring,
-      HERO.eyeHeight + Math.sin(pitch) * dist + 1.2,
-      player.pos.z - Math.cos(player.yaw) * ring,
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.28, 0.1, 12),
+      new THREE.MeshStandardMaterial({ color: 0xc23b2e, roughness: 0.8 })
     );
-    camera.position.x = easeToward(camera.position.x, goal.x, 10, dt);
-    camera.position.y = easeToward(camera.position.y, goal.y, 10, dt);
-    camera.position.z = easeToward(camera.position.z, goal.z, 10, dt);
-    camera.lookAt(player.pos.x, player.pos.y + 1.6, player.pos.z);
-    if (Math.abs(camera.fov - 68) > 0.1) {
-      camera.fov = 68;
-      camera.updateProjectionMatrix();
-    }
-  } else if (player.car) {
-    const car = player.car;
-    const back = 10 + Math.abs(car.speed) * 0.12;
-    const goal = new THREE.Vector3(
-      car.pos.x - Math.sin(car.yaw) * back,
-      4 + Math.abs(car.speed) * 0.03,
-      car.pos.z - Math.cos(car.yaw) * back,
-    );
-    camera.position.x = easeToward(camera.position.x, goal.x, 4.5, dt);
-    camera.position.y = easeToward(camera.position.y, goal.y, 4.5, dt);
-    camera.position.z = easeToward(camera.position.z, goal.z, 4.5, dt);
-    camera.lookAt(car.pos.x + Math.sin(car.yaw) * 6, 1.4, car.pos.z + Math.cos(car.yaw) * 6);
-    player.yaw = car.yaw;
-    player.pos.copy(car.pos);
-    const wantFov = 68 + Math.min(1, Math.abs(car.speed) / 36) * 8;
-    if (Math.abs(camera.fov - wantFov) > 0.1) {
-      camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 4);
-      camera.updateProjectionMatrix();
-    }
-  }
-}
+    cap.position.y = 2.02;
+    g.add(cap);
 
-// Menu backdrop: a slow lissajous drift over the rooftops, never quite
-// repeating, always looking at the town centre.
-export function orbitMenuCam(camera, t) {
-  camera.position.set(
-    Math.sin(t * 0.045) * 160,
-    52 + Math.sin(t * 0.03) * 14,
-    Math.sin(t * 0.03 + 1.3) * 160,
-  );
-  camera.lookAt(0, 8, 0);
+    this.legL = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.62, 8), jeans);
+    this.legL.position.set(-0.18, 0.31, 0);
+    g.add(this.legL);
+    this.legR = this.legL.clone();
+    this.legR.position.x = 0.18;
+    g.add(this.legR);
+
+    this.armL = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.6, 8), jacket);
+    this.armL.position.set(-0.46, 1.15, 0);
+    g.add(this.armL);
+    this.armR = this.armL.clone();
+    this.armR.position.x = 0.46;
+    g.add(this.armR);
+
+    // A visible pistol in the right hand when armed.
+    this.gun = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.12, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x181818, roughness: 0.5, metalness: 0.7 })
+    );
+    this.gun.position.set(0.46, 0.82, 0.18);
+    g.add(this.gun);
+
+    this.group = g;
+    this.group.position.copy(this.pos);
+    scene.add(g);
+  }
+
+  get forward() {
+    return { x: Math.sin(this.heading), z: Math.cos(this.heading) };
+  }
+
+  // input: {f,b,l,r,run} in camera space; camYaw is the camera heading.
+  update(dt, input, camYaw, colliders, bounds) {
+    if (!this.onFoot) {
+      this.group.visible = false;
+      return;
+    }
+    this.group.visible = true;
+    let mx = 0;
+    let mz = 0;
+    if (input.f) mz += 1;
+    if (input.b) mz -= 1;
+    if (input.l) mx -= 1;
+    if (input.r) mx += 1;
+    const len = Math.hypot(mx, mz);
+    const target = input.run ? CONFIG.playerRun : CONFIG.playerWalk;
+    if (len > 0) {
+      mx /= len;
+      mz /= len;
+      // Rotate the camera-space stick into world space.
+      const sin = Math.sin(camYaw);
+      const cos = Math.cos(camYaw);
+      const wx = mx * cos - mz * sin;
+      const wz = mx * sin + mz * cos;
+      this.heading = Math.atan2(wx, wz);
+      this.speed += (target - this.speed) * Math.min(1, dt * 10);
+      this.pos.x += wx * this.speed * dt;
+      this.pos.z += wz * this.speed * dt;
+      this.walkPhase += dt * this.speed * 1.6;
+    } else {
+      this.speed += (0 - this.speed) * Math.min(1, dt * 8);
+    }
+    resolveCircleCollision(this.pos, 0.55, colliders, bounds);
+    this.group.position.set(this.pos.x, 0, this.pos.z);
+    this.group.rotation.y = this.heading;
+    // Walk swing.
+    const swing = Math.sin(this.walkPhase) * Math.min(0.55, this.speed / CONFIG.playerRun);
+    this.legL.rotation.x = swing;
+    this.legR.rotation.x = -swing;
+    this.armL.rotation.x = -swing * 0.8;
+    this.armR.rotation.x = swing * 0.8;
+  }
+
+  enterCar(car) {
+    this.onFoot = false;
+    this.currentCar = car;
+    this.group.visible = false;
+  }
+
+  exitCar() {
+    if (!this.currentCar) return null;
+    const car = this.currentCar;
+    this.currentCar = null;
+    this.onFoot = true;
+    // Step out to the driver's side.
+    const side = { x: Math.cos(car.heading), z: -Math.sin(car.heading) };
+    this.pos.set(car.pos.x + side.x * 2.2, 0, car.pos.z + side.z * 2.2);
+    this.heading = car.heading;
+    this.group.position.copy(this.pos);
+    this.group.visible = true;
+    return car;
+  }
+
+  teleport(x, z, heading) {
+    this.pos.set(x, 0, z);
+    if (heading !== undefined) this.heading = heading;
+    this.group.position.copy(this.pos);
+  }
+
+  damage(n) {
+    this.health = Math.max(0, this.health - n);
+    return this.health;
+  }
+
+  heal(n) {
+    this.health = Math.min(CONFIG.startHealth, this.health + n);
+  }
 }

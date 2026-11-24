@@ -1,167 +1,137 @@
-// ZENITH — combat.js (round 3 redo)
-// The pistol and the people who shoot back. Hitscan from the camera with
-// a whisker of spread; every shot leaves a short-lived tracer (a thin
-// glowing rod stretched between muzzle and impact), a muzzle flash, and
-// a small kick to the camera. Rivals fire in bursts and get less
-// accurate the further away they are.
-import * as THREE from 'three';
-import { GUN } from './config.js';
+// ZENITH — combat. A pistol with 12 rounds, raycast hits, a tracer line and
+// a muzzle flash. Shooting a pedestrian, a car or a cop all raise heat.
+import { CONFIG } from './config.js';
 
-export function newArsenal() {
-  return {
-    ammo: GUN.magSize,
-    reserve: 999,
-    reloading: false,
-    reloadTimer: 0,
-    fireTimer: 0,
-    tracers: [], // {mesh, life, maxLife}
-  };
-}
+export class Combat {
+  constructor(THREE, scene, camera) {
+    this.THREE = THREE;
+    this.scene = scene;
+    this.camera = camera;
+    this.ammo = 12;
+    this.magSize = 12;
+    this.cooldown = 0;
+    this.reloadTimer = 0;
+    this.shotsFired = 0;
+    this.hits = 0;
+    this.raycaster = new THREE.Raycaster();
+    this.raycaster.far = 120;
 
-// Stretch a unit cylinder between two points and fade it out over `life`.
-function drawTracer(G, from, to, color, life) {
-  const dir = new THREE.Vector3().subVectors(to, from);
-  const len = dir.length();
-  if (len < 0.01) return;
-  const geo = new THREE.CylinderGeometry(0.03, 0.03, len, 5, 1, true);
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 });
-  const rod = new THREE.Mesh(geo, mat);
-  rod.position.copy(from).addScaledVector(dir, 0.5);
-  rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-  G.scene.add(rod);
-  G.combat.tracers.push({ mesh: rod, life, maxLife: life });
-}
-
-// Fire one shot from the camera centre. `targets` are the shootables:
-// anything with {pos, hp, alive, kind, mesh}. Returns {hit, end} so the
-// game loop can price the crime, or null when the gun cannot fire.
-export function shoot(G, targets) {
-  const c = G.combat;
-  if (c.reloading || c.fireTimer > 0) return null;
-  if (c.ammo <= 0) {
-    G.sound.dryClick();
-    return null;
-  }
-  c.fireTimer = GUN.fireInterval;
-  c.ammo -= 1;
-  G.sound.shot();
-  G.recoil = 0.035;
-
-  const origin = G.camera.position.clone();
-  const dir = new THREE.Vector3();
-  G.camera.getWorldDirection(dir);
-  dir.x += (Math.random() - 0.5) * 0.012;
-  dir.y += (Math.random() - 0.5) * 0.012;
-  dir.normalize();
-  const ray = new THREE.Raycaster(origin, dir, 0.1, GUN.range);
-
-  // Refresh world matrices first: a target spawned this frame must be hit
-  // where it stands, not where its unrendered identity matrix puts it.
-  const meshes = [];
-  const owner = new Map();
-  for (const t of targets) {
-    if (!t.alive || !t.mesh) continue;
-    t.mesh.updateMatrixWorld(true);
-    t.mesh.traverse((o) => {
-      if (o.isMesh) {
-        meshes.push(o);
-        owner.set(o, t);
-      }
-    });
-  }
-  const hits = ray.intersectObjects(meshes, false);
-  let end = origin.clone().addScaledVector(dir, GUN.range);
-  let hit = null;
-  if (hits.length) {
-    end = hits[0].point.clone();
-    hit = owner.get(hits[0].object) || null;
-    if (hit) {
-      hit.hp -= GUN.damage;
-      if (hit.hp <= 0) {
-        hit.alive = false;
-        if (hit.mesh) hit.mesh.visible = false;
-      }
-    }
-  }
-  drawTracer(G, origin, end, 0xffd76a, 0.09);
-  const flash = new THREE.PointLight(0xffc860, 12, 9, 1.5);
-  flash.position.copy(origin).addScaledVector(dir, 0.8);
-  G.scene.add(flash);
-  setTimeout(() => G.scene.remove(flash), 60);
-  return { hit, end };
-}
-
-export function beginReload(G) {
-  const c = G.combat;
-  if (c.reloading || c.ammo === GUN.magSize) return;
-  c.reloading = true;
-  c.reloadTimer = GUN.reloadSeconds;
-  G.sound.reload();
-}
-
-export function tickArsenal(G, dt) {
-  const c = G.combat;
-  if (c.fireTimer > 0) c.fireTimer -= dt;
-  if (c.reloading) {
-    c.reloadTimer -= dt;
-    if (c.reloadTimer <= 0) {
-      c.reloading = false;
-      c.ammo = GUN.magSize;
-    }
-  }
-  for (let i = c.tracers.length - 1; i >= 0; i--) {
-    const t = c.tracers[i];
-    t.life -= dt;
-    t.mesh.material.opacity = Math.max(0, t.life / t.maxLife) * 0.85;
-    if (t.life <= 0) {
-      G.scene.remove(t.mesh);
-      t.mesh.geometry.dispose();
-      t.mesh.material.dispose();
-      c.tracers.splice(i, 1);
-    }
-  }
-}
-
-// All player damage funnels through here so the flash and the wasted
-// flow can never be forgotten by a caller.
-export function hurtPlayer(G, amount) {
-  if (G.mode !== 'playing' || G.player.hp <= 0) return;
-  G.player.hp = Math.max(0, G.player.hp - amount);
-  G.hudFlash('damage');
-  if (G.player.hp <= 0) G.wasted();
-}
-
-// Rival crew: they hold their ground, face you, and fire three-round
-// bursts with a breath between them. Accuracy falls off with distance.
-export function tickRivals(G, dt) {
-  for (const r of G.rivals) {
-    if (!r.alive) continue;
-    const dist = Math.hypot(r.pos.x - G.player.pos.x, r.pos.z - G.player.pos.z);
-    if (dist >= 55 || G.mode !== 'playing') continue;
-    r.mesh.rotation.y = Math.atan2(G.player.pos.x - r.pos.x, G.player.pos.z - r.pos.z);
-    if (r.burstLeft === undefined) {
-      r.burstLeft = 0;
-      r.shootTimer = 0.6 + Math.random() * 0.6;
-    }
-    r.shootTimer -= dt;
-    if (r.shootTimer > 0) continue;
-    if (r.burstLeft <= 0) r.burstLeft = 3;
-    r.burstLeft--;
-    r.shootTimer = r.burstLeft > 0 ? 0.16 : 1.1 + Math.random() * 0.8;
-
-    const hitChance = Math.max(0.15, 0.6 - dist * 0.008);
-    if (Math.random() < hitChance) {
-      hurtPlayer(G, 9 + Math.floor(Math.random() * 7));
-      G.sound.thud();
-    } else {
-      G.sound.shot();
-    }
-    drawTracer(
-      G,
-      new THREE.Vector3(r.pos.x, 1.4, r.pos.z),
-      new THREE.Vector3(G.player.pos.x, 1.2, G.player.pos.z),
-      0xff6a5a,
-      0.08,
+    // Tracer: a thin line reused for every shot, faded out over 80ms.
+    const tracerGeo = new THREE.BufferGeometry();
+    tracerGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+    this.tracer = new THREE.Line(
+      tracerGeo,
+      new THREE.LineBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0 })
     );
+    this.tracer.frustumCulled = false;
+    scene.add(this.tracer);
+    this.tracerLife = 0;
+
+    this.flash = new THREE.PointLight(0xffc36b, 0, 18, 1.5);
+    scene.add(this.flash);
+    this.flashLife = 0;
+  }
+
+  get reloading() {
+    return this.reloadTimer > 0;
+  }
+
+  startReload() {
+    if (this.reloadTimer <= 0 && this.ammo < this.magSize) this.reloadTimer = 1.2;
+  }
+
+  update(dt) {
+    if (this.cooldown > 0) this.cooldown -= dt;
+    if (this.reloadTimer > 0) {
+      this.reloadTimer -= dt;
+      if (this.reloadTimer <= 0) this.ammo = this.magSize;
+    }
+    if (this.tracerLife > 0) {
+      this.tracerLife -= dt;
+      this.tracer.material.opacity = Math.max(0, this.tracerLife / 0.08);
+    }
+    if (this.flashLife > 0) {
+      this.flashLife -= dt;
+      this.flash.intensity = Math.max(0, this.flashLife / 0.06) * 30;
+    }
+  }
+
+  // Fires from the camera through the screen centre. `world` gives the
+  // pedestrians, vehicles and wanted system for hit resolution.
+  // Returns null, or { kind: 'ped'|'car'|'police'|'none', target }.
+  shoot(world) {
+    if (this.cooldown > 0 || this.reloadTimer > 0) return null;
+    if (this.ammo <= 0) {
+      this.startReload();
+      return { kind: 'empty', target: null };
+    }
+    this.ammo -= 1;
+    this.cooldown = 0.22;
+    this.shotsFired += 1;
+
+    const origin = new this.THREE.Vector3();
+    this.camera.getWorldPosition(origin);
+    const dir = new this.THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    // Start the ray a little ahead of the camera so the player mesh is skipped.
+    origin.addScaledVector(dir, 1.2);
+
+    // Collect hittable meshes: peds, cars (and their children).
+    const targets = [];
+    for (const ped of world.peds.list) {
+      if (ped.state !== 'down') targets.push({ mesh: ped.group, kind: 'ped', ref: ped });
+    }
+    for (const car of world.vehicles.cars) {
+      targets.push({ mesh: car.group, kind: car.isPolice ? 'police' : 'car', ref: car });
+    }
+    const meshes = [];
+    const owner = new Map();
+    for (const t of targets) {
+      t.mesh.traverse((m) => {
+        if (m.isMesh) {
+          meshes.push(m);
+          owner.set(m, t);
+        }
+      });
+    }
+    this.raycaster.set(origin, dir);
+    const hits = this.raycaster.intersectObjects(meshes, false);
+    const end = origin.clone().addScaledVector(dir, 90);
+    let result = { kind: 'none', target: null };
+    if (hits.length > 0) {
+      const hit = hits[0];
+      end.copy(hit.point);
+      const t = owner.get(hit.object);
+      if (t) {
+        this.hits += 1;
+        result = { kind: t.kind, target: t.ref };
+        if (t.kind === 'ped') {
+          world.peds.shootDown(t.ref);
+          world.wanted.addHeat(CONFIG.heatShootPed);
+          world.peds.fleeFrom(t.ref.pos);
+        } else if (t.kind === 'car') {
+          world.vehicles.damage(t.ref, 25);
+          world.wanted.addHeat(CONFIG.heatShootCar);
+        } else if (t.kind === 'police') {
+          world.vehicles.damage(t.ref, 25);
+          world.wanted.addHeat(CONFIG.heatShootPolice);
+        }
+      }
+    } else {
+      // A miss still scares the street.
+      world.peds.fleeFrom(world.player.pos);
+    }
+
+    // Tracer + muzzle flash at the gun.
+    const p = this.tracer.geometry.attributes.position;
+    p.setXYZ(0, origin.x, origin.y, origin.z);
+    p.setXYZ(1, end.x, end.y, end.z);
+    p.needsUpdate = true;
+    this.tracerLife = 0.08;
+    this.tracer.material.opacity = 1;
+    this.flash.position.copy(origin).addScaledVector(dir, 2);
+    this.flashLife = 0.06;
+    this.flash.intensity = 30;
+    return result;
   }
 }

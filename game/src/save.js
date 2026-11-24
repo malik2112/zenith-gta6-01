@@ -1,68 +1,47 @@
-// ZENITH — save.js (round 3 redo)
-// Progress lives in localStorage: cash, story position, and the stats
-// the end screen brags about. One key, one JSON blob, versioned so a
-// future format can migrate instead of breaking old saves. Format v3
-// adds the total play time in seconds.
-import { SAVE_KEY, HUB } from './config.js';
+// ZENITH — save/load. One localStorage key, versioned, with a safe default
+// when nothing is stored yet or the stored JSON is broken.
+export const SAVE_KEY = 'zenith-save-v3';
 
-const SAVE_VERSION = 3;
-
-// Snapshot the parts of the game state worth remembering.
-function packSave(G) {
+export function defaultSave() {
   return {
-    version: SAVE_VERSION,
-    cash: G.player.cash,
-    missionIndex: G.missions.index,
-    missionsDone: G.stats.missionsDone,
-    carsStolen: G.stats.carsStolen,
-    shotsFired: G.stats.shotsFired,
-    nearMisses: G.stats.nearMisses || 0,
-    playSeconds: Math.floor(G.time),
-    savedAt: new Date().toISOString(),
+    money: 250,
+    missionIndex: 0,
+    muted: false,
+    radio: 0,
+    shotsFired: 0,
+    bestMoney: 250,
   };
 }
 
-export function storeSave(G) {
+export function loadSave() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(packSave(G)));
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-export function fetchSave() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    if (!raw) return defaultSave();
     const data = JSON.parse(raw);
-    if (!data || data.version !== SAVE_VERSION) return null;
-    return data;
-  } catch (e) {
-    return null;
+    const d = defaultSave();
+    if (typeof data.money === 'number') d.money = Math.max(0, Math.floor(data.money));
+    if (typeof data.missionIndex === 'number') d.missionIndex = Math.max(0, Math.min(5, Math.floor(data.missionIndex)));
+    if (typeof data.muted === 'boolean') d.muted = data.muted;
+    if (typeof data.radio === 'number') d.radio = Math.max(0, Math.min(2, Math.floor(data.radio)));
+    if (typeof data.shotsFired === 'number') d.shotsFired = Math.max(0, Math.floor(data.shotsFired));
+    if (typeof data.bestMoney === 'number') d.bestMoney = Math.max(0, Math.floor(data.bestMoney));
+    return d;
+  } catch (_e) {
+    return defaultSave();
   }
 }
 
-// Put a loaded save back into the world: money and stats restored, the
-// story resumes at the next unfinished job, Nadia back at the lodge.
-export function restoreSave(G, data) {
-  if (!data) return false;
-  G.player.cash = data.cash ?? 50;
-  G.stats.missionsDone = data.missionsDone ?? 0;
-  G.stats.carsStolen = data.carsStolen ?? 0;
-  G.stats.shotsFired = data.shotsFired ?? 0;
-  G.stats.nearMisses = data.nearMisses ?? 0;
-  G.missions.index = Math.min(data.missionIndex ?? 0, 4);
-  G.missions.state = 'waiting-hub';
-  G.player.pos.set(HUB.x + 6, 0, HUB.z - 18);
-  G.player.mesh.position.copy(G.player.pos);
-  return true;
-}
-
-export function saveExists() {
+export function writeSave(data) {
   try {
-    return !!localStorage.getItem(SAVE_KEY);
-  } catch (e) {
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    return true;
+  } catch (_e) {
     return false;
   }
+}
+
+export function clearSave() {
+  try {
+    window.localStorage.removeItem(SAVE_KEY);
+  } catch (_e) {}
 }

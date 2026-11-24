@@ -1,348 +1,159 @@
-// ZENITH — missions.js (round 3 redo)
-// The story: five jobs for Professor Alden Vark, each a small state
-// machine with a glowing beacon, a minimap blip, and a cash reward.
-// Finish all five and the debt is settled. Every job starts at Ridge
-// Lodge; the next one waits there when the last is done. Timed jobs warn
-// you with a beep and a red objective line when the clock gets short.
-import * as THREE from 'three';
-import { summonWalker } from './pedestrians.js';
-import { HUB } from './config.js';
-import { matchCruisers } from './wanted.js';
+// ZENITH — story missions. Five jobs in order; each has a glowing beacon
+// marker at its current target and a completion rule checked every frame.
+import { CONFIG, MISSIONS } from './config.js';
 
-export const MISSIONS = [
-  {
-    id: 1,
-    title: 'First Ascent',
-    reward: 200,
-    brief:
-      'Vark: "My rover sits by the lodge, Nadia. Take it up to the cable-car terminus on the east ridge. Bring it back without a scratch — I cannot lend what I no longer have."',
-    objective: "Drive Vark's rover to the cable-car terminus",
-    type: 'reach',
-    radius: 9,
-    target: { x: 236, z: 60 },
-    needCar: true,
-  },
-  {
-    id: 2,
-    title: 'Borrowed Rover',
-    reward: 350,
-    brief:
-      'Vark: "A client of mine collects violet coupes and pays cash, no paperwork. Find one on the street, borrow it permanently, and park it at my lodge."',
-    objective: 'Steal a car and bring it to the Ridge Lodge',
-    type: 'steal-deliver',
-    radius: 10,
-    target: { x: -186, z: -168 },
-  },
-  {
-    id: 3,
-    title: 'Heat on the Ridge',
-    reward: 500,
-    brief:
-      'Vark: "You clipped a cruiser and now every badge in Zenith knows your name. Shake the tail first — then the safehouse on Summit Road. Arrive clean or do not arrive."',
-    objective: 'Lose the wanted level, then reach the safehouse',
-    type: 'lose-heat',
-    radius: 10,
-    target: { x: 100, z: 100 },
-    startHeat: 2,
-  },
-  {
-    id: 4,
-    title: 'Lens Run',
-    reward: 700,
-    brief:
-      'Vark: "Three crates of telescope glass, three corners of the ridge, one hundred and fifty seconds. The buyers leave at sundown whether the glass is there or not."',
-    objective: 'Collect 3 lens crates before the timer runs out',
-    type: 'collect',
-    count: 3,
-    timeLimit: 150,
-    packages: [
-      { x: -170, z: 170 },
-      { x: 170, z: 170 },
-      { x: 170, z: -170 },
-    ],
-  },
-  {
-    id: 5,
-    title: 'The Dome Job',
-    reward: 1500,
-    brief:
-      'Vark: "Last one, Nadia. The dome crew changes shift at dawn and leaves a gap. Take the lens prototype, mind the guards, and bring it down the ridge road. Then we are square."',
-    objective: 'Grab the lens prototype at the observatory dome, then escape down the ridge road',
-    type: 'grab-escape',
-    radius: 10,
-    target: { x: 150, z: -138 },
-    startHeat: 3,
-    escape: { x: 236, z: -70 },
-  },
-];
+export class Missions {
+  constructor(THREE, scene, world) {
+    this.THREE = THREE;
+    this.scene = scene;
+    this.world = world;
+    this.defs = MISSIONS;
+    this.index = world.save.missionIndex || 0;
+    this.waypoint = 0;
+    this.shotsAtStart = 0;
+    this.hadStars = false;
+    this.done = this.index >= this.defs.length;
+    this.marker = null;
+    this.ring = null;
+    this.beaconLight = null;
+    this.buildMarker();
+    if (!this.done) this.start(this.index);
+  }
 
-export function newStory() {
-  return {
-    index: 0,
-    state: 'idle', // idle | waiting-hub | active | done
-    timer: 0,
-    collected: 0,
-    packageIndex: 0,
-    phase: 0,
-    warnedLow: false,
-    beacon: null,
-    beaconPos: null,
-    pkgMeshes: [],
-  };
-}
-
-export function activeJob(m) {
-  return m.index < MISSIONS.length ? MISSIONS[m.index] : null;
-}
-
-// The objective beacon: a translucent pillar of light, three stacked
-// rings, and a spinning diamond so it reads from across the map.
-function raiseBeacon(scene) {
-  const group = new THREE.Group();
-  const pillar = new THREE.Mesh(
-    new THREE.CylinderGeometry(3.2, 3.2, 40, 16, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: 0xffd23a,
+  buildMarker() {
+    // Beacon: a tall additive cylinder plus a pulsing ground ring.
+    const geo = new this.THREE.CylinderGeometry(1.6, 2.4, 60, 16, 1, true);
+    const mat = new this.THREE.MeshBasicMaterial({
+      color: 0xffd24a,
       transparent: true,
-      opacity: 0.2,
-      side: THREE.DoubleSide,
+      opacity: 0.22,
+      side: this.THREE.DoubleSide,
       depthWrite: false,
-    }),
-  );
-  pillar.position.y = 20;
-  group.add(pillar);
-  for (let i = 0; i < 3; i++) {
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(3.2 - i * 0.5, 0.22, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffd23a }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.4 + i * 1.1;
-    group.add(ring);
+    });
+    this.marker = new this.THREE.Mesh(geo, mat);
+    this.marker.visible = false;
+    this.scene.add(this.marker);
+    const ringGeo = new this.THREE.RingGeometry(3.2, 4.4, 32);
+    const ringMat = new this.THREE.MeshBasicMaterial({
+      color: 0xffd24a,
+      transparent: true,
+      opacity: 0.85,
+      side: this.THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.ring = new this.THREE.Mesh(ringGeo, ringMat);
+    this.ring.rotation.x = -Math.PI / 2;
+    this.ring.visible = false;
+    this.scene.add(this.ring);
+    this.beaconLight = new this.THREE.PointLight(0xffd24a, 30, 40, 1.5);
+    this.beaconLight.visible = false;
+    this.scene.add(this.beaconLight);
   }
-  const diamond = new THREE.Mesh(
-    new THREE.OctahedronGeometry(1.1),
-    new THREE.MeshBasicMaterial({ color: 0xffd23a }),
-  );
-  diamond.position.y = 8;
-  group.add(diamond);
-  group.userData.diamond = diamond;
-  scene.add(group);
-  return group;
-}
 
-function clearBeacons(G) {
-  const m = G.missions;
-  if (m.beacon) {
-    G.scene.remove(m.beacon);
-    m.beacon = null;
+  current() {
+    return this.done ? null : this.defs[this.index];
   }
-  m.beaconPos = null;
-  for (const p of m.pkgMeshes) G.scene.remove(p);
-  m.pkgMeshes = [];
-}
 
-function pointBeacon(G, pos) {
-  clearBeacons(G);
-  const beacon = raiseBeacon(G.scene);
-  beacon.position.set(pos.x, 0, pos.z);
-  G.missions.beacon = beacon;
-  G.missions.beaconPos = { x: pos.x, z: pos.z };
-}
-
-// The lodge beacon: drive here to pick up the next job.
-export function markLodge(G) {
-  if (!G.missions.beacon) pointBeacon(G, { x: HUB.x, z: HUB.z });
-}
-
-export function beginJob(G, index) {
-  const m = G.missions;
-  const def = MISSIONS[index];
-  m.index = index;
-  m.collected = 0;
-  m.packageIndex = 0;
-  m.phase = 0;
-  m.warnedLow = false;
-  if (!def) {
-    m.state = 'done';
-    return;
+  currentTarget() {
+    const m = this.current();
+    if (!m) return null;
+    if (m.type === 'steal') return null; // any car counts; no fixed point
+    if (m.waypoints) return m.waypoints[Math.min(this.waypoint, m.waypoints.length - 1)];
+    return null;
   }
-  m.state = 'active';
-  m.timer = def.timeLimit || 0;
-  if (def.type === 'collect') {
-    clearBeacons(G);
-    for (const p of def.packages) {
-      const beacon = raiseBeacon(G.scene);
-      beacon.position.set(p.x, 0, p.z);
-      beacon.scale.setScalar(0.6);
-      m.pkgMeshes.push(beacon);
-    }
-    m.beaconPos = { ...def.packages[0] };
-  } else if (def.target) {
-    pointBeacon(G, def.target);
-  }
-  if (def.startHeat) {
-    G.wanted.level = Math.max(G.wanted.level, def.startHeat);
-    G.wanted.quietTimer = 0;
-    G.sound.sirenStart();
-    G.wanted.sirenOn = true;
-    matchCruisers(G);
-  }
-  G.hudMessage(`MISSION ${def.id}: ${def.title} — $${def.reward}`, 'mission');
-  G.sound.missionStart();
-  G.showBriefing(def);
-}
 
-// Called whenever Nadia gets into a car; mission 2 cares.
-export function noteCarTaken(G) {
-  const m = G.missions;
-  if (m.state === 'active' && MISSIONS[m.index] && MISSIONS[m.index].type === 'steal-deliver') {
-    m.phase = 1;
-  }
-}
-
-function postGuards(G, at) {
-  for (let i = 0; i < 2; i++) {
-    const guard = summonWalker(G.scene, at.x + (i ? 6 : -6), at.z + 8, Math.random, 'rival');
-    guard.hp = 100;
-    guard.shootTimer = 1;
-    G.rivals.push(guard);
-    G.peds.push(guard);
-  }
-}
-
-// One handler per mission type; each returns true when the job is done.
-const JOB_STEPS = {
-  reach(G, def, near) {
-    if (!near(def.target, def.radius)) return false;
-    if (G.player.onFoot) {
-      G.hudHint('You need to be in a car for this drop-off.');
-      return false;
-    }
-    return true;
-  },
-  'steal-deliver'(G, def, near) {
-    return G.missions.phase === 1 && !G.player.onFoot && near(def.target, def.radius);
-  },
-  'lose-heat'(G, def, near) {
-    const m = G.missions;
-    if (m.phase === 0 && G.wanted.level === 0) {
-      m.phase = 1;
-      G.hudMessage('Heat is off — get to the safehouse!', 'good');
-      pointBeacon(G, def.target);
-    }
-    return m.phase === 1 && near(def.target, def.radius);
-  },
-  collect(G, def, near) {
-    const m = G.missions;
-    const pkg = def.packages[m.packageIndex];
-    if (!pkg || !near(pkg, 4)) return false;
-    m.collected++;
-    G.sound.cash();
-    G.player.cash += 50;
-    G.hudMessage(`Package ${m.collected}/${def.count} collected (+$50)`, 'good');
-    const mesh = m.pkgMeshes[m.packageIndex];
-    if (mesh) G.scene.remove(mesh);
-    m.packageIndex++;
-    if (m.packageIndex < def.packages.length) {
-      m.beaconPos = { ...def.packages[m.packageIndex] };
-      return false;
-    }
-    return true;
-  },
-  'grab-escape'(G, def, near) {
-    const m = G.missions;
-    if (m.phase === 0 && near(def.target, def.radius)) {
-      m.phase = 1;
-      G.player.cash += 1500;
-      G.hudMessage('Cash grabbed! Get to the docks — the PD is coming!', 'bad');
-      G.sound.cash();
-      pointBeacon(G, def.escape);
-      postGuards(G, def.target);
-      return false;
-    }
-    return m.phase === 1 && near(def.escape, def.radius);
-  },
-};
-
-export function tickStory(G, dt) {
-  const m = G.missions;
-  if (m.state !== 'active') return;
-  const def = MISSIONS[m.index];
-  if (!def) return;
-  if (def.timeLimit) {
-    m.timer -= dt;
-    if (m.timer < 30 && !m.warnedLow) {
-      m.warnedLow = true;
-      G.hudMessage('Thirty seconds left on the clock!', 'bad');
-      G.sound.beep();
-    }
-    if (m.timer <= 0) {
-      flunkJob(G, 'Out of time.');
+  start(i) {
+    this.index = i;
+    this.waypoint = 0;
+    this.shotsAtStart = this.world.combat.hits;
+    this.hadStars = false;
+    const m = this.current();
+    if (!m) {
+      this.done = true;
+      this.setMarker(null);
+      this.world.hud.showBanner('ZENITH COMPLETE', 'All five jobs done. The city is yours.');
       return;
     }
+    this.world.hud.showBanner(`MISSION ${i + 1}: ${m.name}`, m.brief);
+    this.world.hud.setObjective(m.brief);
+    this.setMarker(this.currentTarget());
   }
-  if (m.beacon && m.beacon.userData.diamond) {
-    m.beacon.userData.diamond.rotation.y += dt * 2;
-    m.beacon.userData.diamond.position.y = 8 + Math.sin(G.time * 2.5) * 0.8;
-  }
-  const px = G.player.pos.x;
-  const pz = G.player.pos.z;
-  const near = (t, r) => Math.hypot(px - t.x, pz - t.z) < r;
-  const handler = JOB_STEPS[def.type];
-  if (handler && handler(G, def, near)) finishJob(G);
-}
 
-function finishJob(G) {
-  const m = G.missions;
-  const def = MISSIONS[m.index];
-  G.player.cash += def.reward;
-  G.sound.cash();
-  G.hudMessage(`MISSION COMPLETE: ${def.title} — +$${def.reward}`, 'good');
-  G.stats.missionsDone++;
-  clearBeacons(G);
-  m.index++;
-  if (m.index >= MISSIONS.length) {
-    m.state = 'done';
-    G.storyComplete();
-    return;
+  setMarker(target) {
+    const on = !!target;
+    this.marker.visible = on;
+    this.ring.visible = on;
+    this.beaconLight.visible = on;
+    if (on) {
+      this.marker.position.set(target.x, 30, target.z);
+      this.ring.position.set(target.x, 0.12, target.z);
+      this.beaconLight.position.set(target.x, 6, target.z);
+    }
   }
-  G.saveGame();
-  G.hudMessage("New job at Ridge Lodge — head back to Professor Alden Vark's base.", 'mission');
-  pointBeacon(G, { x: HUB.x, z: HUB.z });
-  m.state = 'waiting-hub';
-}
 
-export function flunkJob(G, reason) {
-  const m = G.missions;
-  G.hudMessage(`MISSION FAILED: ${reason} Talk to Professor Alden Vark to retry.`, 'bad');
-  G.sound.busted();
-  clearBeacons(G);
-  pointBeacon(G, { x: HUB.x, z: HUB.z });
-  m.state = 'waiting-hub';
-}
-
-// Standing in the lodge beacon starts the next job.
-export function checkLodge(G) {
-  const m = G.missions;
-  if (m.state !== 'waiting-hub') return;
-  if (Math.hypot(G.player.pos.x - HUB.x, G.player.pos.z - HUB.z) < 9) {
-    beginJob(G, m.index);
+  advanceWaypoint() {
+    const m = this.current();
+    this.waypoint += 1;
+    if (m.waypoints && this.waypoint >= m.waypoints.length) {
+      this.complete();
+      return;
+    }
+    const t = this.currentTarget();
+    this.world.hud.toast(t ? `Next: ${t.label}` : 'Next objective');
+    this.setMarker(t);
   }
-}
 
-export function objectiveLine(G) {
-  const m = G.missions;
-  if (m.state === 'waiting-hub') {
-    const next = MISSIONS[m.index];
-    return next ? `Go to Ridge Lodge to start: ${next.title}` : 'Story complete!';
+  complete() {
+    const m = this.current();
+    if (!m) return;
+    this.world.money += m.reward;
+    this.world.hud.setMoney(this.world.money);
+    this.world.hud.showBanner('JOB DONE', `+ $${m.reward} — ${m.name}`);
+    this.world.audio.jingle();
+    this.world.saveGame();
+    this.index += 1;
+    if (this.index >= this.defs.length) {
+      this.done = true;
+      this.setMarker(null);
+      this.world.hud.setObjective('All jobs complete. Free roam — Zenith is yours.');
+      this.world.hud.showBanner('ZENITH COMPLETE', 'All five jobs done. The city is yours.');
+      this.world.saveGame();
+      return;
+    }
+    this.start(this.index);
   }
-  if (m.state !== 'active') return 'No active mission';
-  const def = MISSIONS[m.index];
-  let text = def.objective;
-  if (def.type === 'collect') text += ` — ${m.collected}/${def.count}`;
-  if (def.timeLimit) text += ` — ${Math.max(0, Math.ceil(m.timer))}s left`;
-  if (def.type === 'grab-escape' && m.phase === 1) text = 'Escape to the docks!';
-  if (def.type === 'lose-heat' && m.phase === 0) text = 'Lose the wanted level!';
-  return text;
+
+  update(dt, time) {
+    // Beacon pulse.
+    if (this.marker.visible) {
+      const s = 1 + Math.sin(time * 3) * 0.12;
+      this.ring.scale.setScalar(s);
+      this.marker.material.opacity = 0.18 + Math.sin(time * 3) * 0.06;
+    }
+    const m = this.current();
+    if (!m || this.world.state !== 'playing') return;
+    const player = this.world.player;
+    const target = this.currentTarget();
+    if (target) {
+      const d = Math.hypot(player.pos.x - target.x, player.pos.z - target.z);
+      this.world.hud.setDistance(d, target.label);
+    } else {
+      this.world.hud.setDistance(null, '');
+    }
+    if (m.type === 'steal') {
+      if (!player.onFoot) this.complete();
+    } else if (m.type === 'drive-to' || m.type === 'heist') {
+      if (target) {
+        const d = Math.hypot(player.pos.x - target.x, player.pos.z - target.z);
+        if (d < 9) this.advanceWaypoint();
+      }
+    } else if (m.type === 'escape') {
+      if (this.world.wanted.stars >= (m.needStars || 2)) this.hadStars = true;
+      if (this.hadStars && this.world.wanted.stars === 0) this.complete();
+    } else if (m.type === 'shoot') {
+      const done = this.world.combat.hits - this.shotsAtStart;
+      this.world.hud.setObjective(`${m.brief}  (${done}/${m.needHits} down)`);
+      if (done >= (m.needHits || 5)) this.complete();
+    }
+  }
 }

@@ -1,93 +1,89 @@
-# ZENITH — an open-world crime game
-
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/malik2112/zenith-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/malik2112/zenith-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An original open-world crime game written for [make.fun's **gta6-01** bounty](https://make.fun/bounty/gta6-01).
-It is plain static files — no build step, no network, no assets to download.
-Open `game/index.html` in a desktop browser, or run `node serve.ts` and
-visit http://localhost:8080.
+# ZENITH — Open-World Crime
 
-## The pitch
+A sunset open-world crime game built for the [make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01). You are a nobody with a pistol and a dream in Zenith, a mountain town that never quite cools down after sunset. Steal cars, outrun the law, and run five story jobs to own the city.
 
-You are **Nadia Kaur**, a getaway driver who rolled into the mountain town
-of **Zenith** owing money to **Professor Alden Vark**, the fixer who runs
-the observatory lodge on Ridge Road. Five jobs settle the debt: an errand
-up the ridge, a car to "borrow", a hot pursuit to shake, a timed crate
-run, and one last job at the dome. Everything — city, people, cars,
-story, music — is original fiction; no part of any commercial game is used.
+## Play
 
-## What's in the game
+Serve the game locally (no build step, no install) and open it in a desktop browser:
 
-- **A whole town, procedurally built**: a 6×6-block grid of pastel towers
-  with lit windows, an observatory dome and radio dish, cable-car pylons,
-  pine rows along the ridge shelf, the violet valley beyond — and Summit
-  Plaza, a fountain square with benches at the town centre.
-- **Drive anything**: traffic cruises the road graph in its lane; walk up
-  to any car and press **E** to take it. Arcade handling with a real
-  drift model — the car has a facing and a direction of travel, and grip
-  pulls one back in line with the other. Brake lights flare when you
-  brake; the camera's field of view widens as speed builds.
-- **Near misses pay**: thread traffic at speed without touching it and
-  each close pass earns **+$25** of danger money.
-- **Signature mechanic — RIDGE ICE**: the east ridge road past the
-  observatory is polished rock and morning ice. Steering bites late and
-  every slide lasts longer. Easy does it.
-- **Wanted system**: steal, run someone down, or open fire and the stars
-  climb. Ridge PD cruisers dispatch from real roads, lead their target
-  to intercept you, ram, and bust you on foot. Lay low and the heat cools.
-  The siren gets louder as the nearest cruiser closes in.
-- **Combat**: a 12-round pistol with tracers, muzzle flash, reloads, and
-  a small camera kick on every shot; rival crew who fire in bursts and
-  shoot back.
-- **People**: walkers stroll the pavements, pause at corners, stop to
-  chat with each other, and sprint away from gunfire or a car coming
-  too fast.
-- **HUD**: cash, health, wanted stars, a live minimap with traffic and
-  cruiser blips, a mission objective that turns red (with a warning
-  beep) when a timed job gets short, a live zone label that names the
-  district you're standing in, speed, ammo, an in-game clock, and a
-  synth radio (SUMMIT FM 94.7) generated live with WebAudio.
-- **Save**: progress persists in localStorage; Continue resumes at the lodge.
+```sh
+node serve.ts 8080
+# open http://127.0.0.1:8080/game/index.html
+```
+
+Or open `game/index.html` directly from any static file server. Three.js is vendored under `game/vendor/three/` — the game loads fully offline.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| W A S D | Move / drive |
-| Mouse | Look around (click to lock) |
-| Shift | Sprint |
-| E | Enter / exit / steal a car |
-| F | Horn (in car) — scatters pedestrians |
-| Space | Handbrake (in car) |
-| Click | Fire pistol |
+| WASD | Move / drive |
+| Shift | Run |
+| E | Steal a car / exit a car |
+| Click | Shoot (on foot) |
 | R | Reload |
-| M | Toggle mission details |
-| H | Toggle radio |
-| P / Esc | Pause |
+| N | Next radio station |
+| M | Mute |
+| Esc | Pause |
 
-## How it's built
+## Features
 
-- `game/index.html` — the page, HUD and menus
-- `game/src/main.js` — boot, the frame loop, input, car enter/exit, end flows
-- `game/src/config.js` — every tuning number, the palette, the story text, the district zones
-- `game/src/city.js` — the procedural town (incl. Summit Plaza), collisions, the road graph
-- `game/src/vehicles.js` — car meshes, the drift driving model, traffic and police AI, near misses
-- `game/src/pedestrians.js` — the figure builder and the walker state machine (incl. chatting)
-- `game/src/player.js` — on-foot movement and the third-person camera (FOV kick, recoil)
-- `game/src/combat.js` — the pistol, tracers, rival bursts
-- `game/src/wanted.js` — heat, stars, cruiser dispatch, the bust, distance-based siren
-- `game/src/missions.js` — the five-job story, its beacons, and the low-time warning
-- `game/src/hud.js` — HUD readouts, the live minimap, and the zone label
-- `game/src/save.js` — localStorage save/load (format v3)
-- `game/src/audio.js` — all sound synthesised with WebAudio, no audio files
-- `game/src/shots.js` — staged scenes for the screenshots (`?shot=start|street|drive|mission`)
-- `game/src/selftest.js` — a headless play-through check (`?selftest=1`)
-- `game/vendor/three/three.module.min.js` — three.js (MIT), vendored
-- `main.ts` — the make.fun entrypoint: copies `game/` and `screenshots/` out and writes the dossier
-- `serve.ts` — a tiny static server for local play (`--port`, `--host`)
+- **A living city**: a road grid with sidewalks and streetlights, ~50 buildings with lit windows, a plaza, scrub trees, and a ring of snowy mountains around a gradient sunset sky.
+- **Drivable cars**: six parked cars to steal, arcade handling with speed-sensitive steering, headlights, damage smoke, and police interceptors with flashing light bars.
+- **Pedestrians**: walkers who stroll the sidewalks, flee from gunfire, and fall when shot.
+- **Wanted system**: 0–5 stars driven by a heat meter. Crimes add heat, quiet time cools it. At 1+ stars police cars chase you; get caught on foot and you are busted, fined, and dumped back on the street.
+- **Five story missions**: First Wheels (steal a car), Sunset Courier (two checkpoints), Street Heat (reach 2 stars, then lose them), Rooftop Standoff (drop 5 targets), Zenith Heist (vault, then the docks). Each pays out; progress saves in the browser.
+- **HUD + minimap**: money, health, ammo, wanted stars, objective tracker, distance readout, and a live 2D minimap with the player arrow, cars, pedestrians, police, and the mission beacon.
+- **Procedural audio**: synthesized engine hum, gunshots, sirens, and three radio stations — no audio files.
+- **Save/load**: money, mission progress, mute, and radio station persist in `localStorage`.
+- **Self-test**: open `game/index.html?selftest=1` for an in-browser checklist of every subsystem.
+
+## Screenshots
+
+Staged in-session with a headless browser (`?shot=drive|street|mission|start`):
+
+- `screenshots/1-drive.jpg` — driving the Sunset Courier job
+- `screenshots/2-street.jpg` — on foot at the central intersection
+- `screenshots/3-mission.jpg` — Street Heat at 2 stars with a unit closing in
+- `screenshots/4-start.jpg` — the title menu over the city at dusk
+
+## Layout
+
+```
+game/
+  index.html        page + import map + HUD styles
+  src/
+    config.js       tunables, mission defs, radio stations, spawns
+    city.js         sunset town: roads, buildings, mountains, colliders
+    player.js       on-foot movement, enter/exit car
+    vehicles.js     car factory, arcade driving, police chase
+    pedestrians.js  walkers, flee AI, fall/respawn
+    combat.js       pistol, raycast hits, tracer, muzzle flash
+    wanted.js       heat, stars, police spawn, busted
+    missions.js     five-job state machine + beacon marker
+    hud.js          DOM HUD, minimap, menu / pause / busted screens
+    audio.js        WebAudio synth: engine, shots, siren, radio
+    save.js         localStorage save/load
+    selftest.js     ?selftest=1 checklist
+    shots.js        ?shot= staging for screenshots
+    main.js         boot, input, camera, game loop
+  vendor/three/     vendored Three.js (r187)
+vendor/makefun-game.ts   dossier builder (kit starter, untouched)
+main.ts             builds dossier.json (makefun/dossier/v1)
+serve.ts            static file server for local play
+```
+
+## Dossier
+
+```sh
+MAKEFUN_OUTPUT_DIR=/tmp/zenith-out node main.ts
+# writes /tmp/zenith-out/dossier.json
+```
 
 ## License
 
-MIT — see LICENSE.
+MIT — see `LICENSE`. Three.js is MIT-licensed by the Three.js Authors.

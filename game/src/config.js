@@ -1,188 +1,130 @@
-// ZENITH — config.js (round 3 redo)
-// One file holds every number the game argues about: the shape of the
-// town, how a car feels, what a crime costs, what the sky looks like.
-// The other modules import these tables and never invent tuning of
-// their own, so rebalancing the whole game means editing this one file.
-
-export const GAME_TITLE = 'ZENITH';
-export const GAME_SUBTITLE = 'An open-world crime story in the mountain town of Zenith';
-export const SAVE_KEY = 'zenith-save-v3';
-
-// ---------------------------------------------------------------- the town
-// The street grid: GRID_SIDE squares of GRID_STEP metres, roads on the
-// grid lines, buildings inside the squares. The built-up area spans
-// -span..+span on both axes; east of it the ridge road climbs past the
-// observatory toward the valley haze, which is where the world ends.
-const GRID_SIDE = 6;
-const GRID_STEP = 70;
-const SPAN = (GRID_SIDE * GRID_STEP) / 2; // 210
-
-export const TOWN = Object.freeze({
-  blocks: GRID_SIDE,
-  block: GRID_STEP,
-  streetWidth: 16,
-  half: SPAN,
-  beachX: SPAN + 16,   // ridge rock shelf begins (east edge)
-  waterX: SPAN + 52,   // violet valley haze begins
-  boundX: SPAN + 78,   // hard eastern bound, out on the shelf
-  boundZ: SPAN + 18,   // hard bound on the other three sides
-  fogNear: 120,
-  fogFar: 380,
-  sunIntensity: 1.9,
-});
-
-// Named districts, for the live zone label in the HUD. Checked in order;
-// the first box containing the player wins.
-export const ZONES = Object.freeze([
-  { name: 'RIDGE LODGE', x0: -228, x1: -140, z0: -228, z1: -120 },
-  { name: 'OBSERVATORY', x0: 110, x1: 190, z0: -190, z1: -110 },
-  { name: 'RIDGE ROAD', x0: TOWN.beachX, x1: TOWN.boundX, z0: -228, z1: 228 },
-  { name: 'SUMMIT PLAZA', x0: -45, x1: 45, z0: -45, z1: 45 },
-  { name: 'DOWNTOWN', x0: -228, x1: 228, z0: -228, z1: 228 },
-]);
-
-// ---------------------------------------------------------------- the story
-// Ridge Lodge is where every job starts and where the story ends.
-export const HUB = Object.freeze({ x: -186, z: -168 });
-export const HUB_NAME = 'Ridge Lodge';
-export const PD_NAME = 'Ridge PD';
-export const RADIO_NAME = 'SUMMIT FM 94.7';
-export const COMPLETE_TITLE = 'QUEEN OF THE RIDGE';
-export const BUSTED_TEXT =
-  'The Ridge PD finally boxed you in. A $100 fine, a long walk back, and they dropped you at the lodge.';
-export const WASTED_TEXT =
-  'Ridge Clinic stitched you back together for $100. The good news: nobody is looking for you anymore.';
-export const CLOCK_START = 1145; // minutes after midnight when a fresh game opens
-
-export const STORY = Object.freeze({
-  hero: 'Nadia Kaur',
-  fixer: 'Professor Alden Vark',
-  intro:
-    'Nadia Kaur rolled into Zenith with a dying rover and a debt she could not outrun. ' +
-    'Professor Alden Vark, who runs the observatory lodge up on Ridge Road, offered her a way out: ' +
-    'five jobs, no questions, cash on completion. Drive clean, steal smarter, and stay ahead of the ' +
-    'Ridge PD — their stars do not come off easy.',
-  outro:
-    'The last crate is delivered, the debt is settled, and the ridge road is quiet behind you. ' +
-    'Zenith belongs to the driver who never got caught. QUEEN OF THE RIDGE.',
-});
-
-// The one road that drives like no other road in town: past the observatory
-// the ridge shelf is polished rock and morning ice, so the wheel answers
-// late and every slide lasts a breath longer.
-export const MECHANIC = Object.freeze({
-  type: 'ice',
-  blurb:
-    'RIDGE ICE: the east ridge road (past the observatory) is slick — steering bites late, slides last longer.',
-});
-
-// ---------------------------------------------------------------- the hero
-export const HERO = Object.freeze({
-  walkSpeed: 6,
-  runSpeed: 11,
-  radius: 0.6,
-  height: 1.8,
-  eyeHeight: 1.62,
-  maxHp: 100,
-  jumpSpeed: 0, // Zenith is a driving town; feet stay on the ground
-});
-
-// ---------------------------------------------------------------- the cars
-// Arcade numbers, tuned for fun over realism: strong brakes, forgiving grip,
-// a handbrake that actually rotates the car.
-export const DRIVE = Object.freeze({
-  accel: 22,
-  brake: 34,
-  reverseMax: 12,
-  maxSpeed: 36,
-  turnRate: 2.0,
-  grip: 6.5,
-  handbrakeTurn: 3.1,
-  radius: 1.5,
-});
-
-// Ambient population: how many cars cruise and how many people walk.
-export const CROWD = Object.freeze({
-  carCount: 12,
-  carSpeed: 9,
-  pedCount: 18,
+// ZENITH — configuration. Every tunable number of the game lives here so
+// the other modules stay small and consistent. Written from scratch.
+export const CONFIG = {
+  worldSize: 640, // playable square, metres, centred on (0, 0)
+  roadSpacing: 80, // distance between parallel roads
+  roadWidth: 12,
+  playerWalk: 9,
+  playerRun: 14,
+  carAccel: 26,
+  carBrake: 40,
+  carMaxSpeed: 42,
+  carMaxReverse: 12,
+  carTurn: 1.9,
+  policeMaxSpeed: 46,
   pedSpeed: 1.6,
-});
+  pedFleeSpeed: 4.4,
+  gravity: 30,
+  startMoney: 250,
+  startHealth: 100,
+  bustedFine: 200,
+  // Wanted heat: 0..100. Stars are derived from heat bands.
+  heatPerStar: 20,
+  heatDecayPerSec: 2.2,
+  heatStealCar: 15,
+  heatShootPed: 25,
+  heatShootCar: 10,
+  heatShootPolice: 40,
+  heatKillCop: 50,
+  // Sunset palette.
+  skyTop: 0x2b1a4e,
+  skyHorizon: 0xff7e3d,
+  fogColor: 0x3a2350,
+  fogDensity: 0.0016,
+  sunColor: 0xffb36b,
+  sunIntensity: 2.4,
+  hemiSky: 0x8a6bbf,
+  hemiGround: 0x2a1a2e,
+  hemiIntensity: 0.9,
+  keys: {
+    forward: 'KeyW',
+    back: 'KeyS',
+    left: 'KeyA',
+    right: 'KeyD',
+    run: 'ShiftLeft',
+    enterCar: 'KeyE',
+    reload: 'KeyR',
+    mute: 'KeyM',
+    pause: 'Escape',
+    radioNext: 'KeyN',
+  },
+};
 
-// ---------------------------------------------------------------- the law
-// Heat is priced per crime; stars cool down only after a quiet stretch
-// with no cruiser close enough to see you. A near miss at speed pays a
-// little danger money — threading traffic is a skill, after all.
-export const HEAT = Object.freeze({
-  max: 5,
-  decaySeconds: 26,
-  bustDistance: 3.2, // a stopped cruiser this close, while you are on foot…
-  bustSeconds: 1.6,  // …for this long, and the cuffs come out
-  heatStealCar: 1,
-  heatHitPed: 1,
-  heatShoot: 1,
-  heatKillCop: 2,
-  heatRamCop: 1,
-  nearMissBonus: 25,
-  nearMissMinSpeed: 15,
-  nearMissGap: 2.6,
-  nearMissCooldown: 4,
-});
+// The five story missions, in order. `type` drives the completion check in
+// missions.js; `waypoints` are tried in order for multi-stop missions.
+export const MISSIONS = [
+  {
+    id: 'first-wheels',
+    name: 'First Wheels',
+    brief: 'You need wheels. Find a parked car, press E to take it, and drive.',
+    type: 'steal',
+    reward: 150,
+  },
+  {
+    id: 'sunset-courier',
+    name: 'Sunset Courier',
+    brief: 'Drive the package through both checkpoints before the sun is gone.',
+    type: 'drive-to',
+    waypoints: [
+      { x: -160, z: -160, label: 'Checkpoint A' },
+      { x: 160, z: 160, label: 'Checkpoint B' },
+    ],
+    reward: 300,
+  },
+  {
+    id: 'street-heat',
+    name: 'Street Heat',
+    brief: 'Get the cops to 2 stars, then shake them and go quiet.',
+    type: 'escape',
+    needStars: 2,
+    reward: 400,
+  },
+  {
+    id: 'rooftop-standoff',
+    name: 'Rooftop Standoff',
+    brief: 'Rivals own this block. Drop 5 targets. Watch your wanted level.',
+    type: 'shoot',
+    needHits: 5,
+    reward: 500,
+  },
+  {
+    id: 'zenith-heist',
+    name: 'Zenith Heist',
+    brief: 'Hit the vault on the north strip, then run for the docks.',
+    type: 'heist',
+    waypoints: [
+      { x: 0, z: -240, label: 'Zenith Vault' },
+      { x: -240, z: 240, label: 'Docks Escape' },
+    ],
+    reward: 1000,
+  },
+];
 
-// ---------------------------------------------------------------- the gun
-export const GUN = Object.freeze({
-  magSize: 12,
-  reloadSeconds: 1.4,
-  range: 90,
-  damage: 34,
-  fireInterval: 0.22,
-  pedHp: 50,
-  copHp: 80,
-  rivalHp: 100,
-});
+// Three procedural radio stations. Each is a scale of semitone offsets from
+// a root note plus a tempo; audio.js turns them into a loop.
+export const RADIO = [
+  { name: 'ZENITH FM — synthwave', root: 57, bpm: 96, scale: [0, 3, 5, 7, 10, 12, 15] },
+  { name: 'VICE 88 — night drive', root: 52, bpm: 78, scale: [0, 2, 4, 7, 9, 12] },
+  { name: 'MOUNTAIN — dusty roads', root: 45, bpm: 112, scale: [0, 3, 5, 8, 10, 12] },
+];
 
-// ---------------------------------------------------------------- the look
-// Dusk over the ridge: violet sky, warm sun, pastel towers.
-export const COLORS = Object.freeze({
-  sky: 0x8a7fc0,
-  fog: 0x7a6fa8,
-  sun: 0xffd9a0,
-  asphalt: 0x2c2c34,
-  sidewalk: 0x8a8a96,
-  sand: 0x6a6a72,
-  sea: 0x8a7fb8,
-  building: Object.freeze([
-    0x8a86a8, 0x6a7a9a, 0xb8a88a, 0x9a8ab8,
-    0xd8d8e0, 0x7a6a8a, 0xc8b8a8, 0x5a5a6a,
-  ]),
-  glass: 0x4a5a7a,
-  palmTrunk: 0x5a4632,
-  palmLeaf: 0x2a6a3a,
-  carPaint: Object.freeze([
-    0x8a7fc0, 0x2e6fc2, 0xe8c23a, 0x3aa88a,
-    0xc23b2e, 0xe8e8e8, 0x222831, 0xd97a2b,
-  ]),
-  ground: 0x5a5e52,
-  hemiSky: 0x9a8ac8,
-  hemiGround: 0x4a4448,
-  minimapSea: '#8a7fb8',
-  minimapSand: '#6a6a72',
-  plazaStone: 0x9a9484,
-  fountainWater: 0x6ab8d8,
-});
-
-// ---------------------------------------------------------------- the keys
-// Shown verbatim on the start screen; keep in step with main.js.
-export const CONTROLS = Object.freeze([
-  ['W A S D', 'Move / drive'],
-  ['Mouse', 'Look around (click to lock)'],
-  ['Shift', 'Sprint / NITRO boost (in car)'],
-  ['E', 'Enter / exit / steal a car'],
-  ['F', 'Horn (in car) — scatters pedestrians'],
-  ['Space', 'Handbrake (in car)'],
-  ['Click', 'Fire pistol'],
-  ['R', 'Reload'],
-  ['M', 'Toggle mission details'],
-  ['P / Esc', 'Pause'],
-  ['H', 'Toggle radio'],
-]);
+// Fixed spawn anchors the city hands out, so staging and missions agree.
+// Cars sit at the curb of a road (road centre +/- 7), peds on sidewalks
+// (road centre +/- 8.5), so nothing ever spawns inside a building.
+export const SPAWNS = {
+  player: { x: 8.5, z: 40, heading: Math.PI },
+  cars: [
+    { x: 24, z: 7, heading: Math.PI / 2, color: 0xc23b2e },
+    { x: -24, z: -7, heading: -Math.PI / 2, color: 0x2e6fc2 },
+    { x: 104, z: 87, heading: Math.PI / 2, color: 0xd8b13a },
+    { x: -104, z: -87, heading: -Math.PI / 2, color: 0x3aa655 },
+    { x: 7, z: 184, heading: 0, color: 0x8a3ac2 },
+    { x: -7, z: -184, heading: Math.PI, color: 0xcccccc },
+  ],
+  peds: [
+    { x: 8, z: 88 }, { x: -8, z: 168 }, { x: 88, z: -8 }, { x: -88, z: 48 },
+    { x: 168, z: 88 }, { x: -168, z: -88 }, { x: 48, z: -8 }, { x: -88, z: 208 },
+    { x: 88, z: 208 }, { x: -88, z: -208 }, { x: 168, z: -48 }, { x: -208, z: 168 },
+    { x: 56, z: 168 }, { x: -56, z: -168 },
+  ],
+};
