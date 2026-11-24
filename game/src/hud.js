@@ -1,13 +1,14 @@
-// ZENITH — hud.js (fresh rewrite, round 3)
+// ZENITH — hud.js (round 3 redo)
 // Everything the player reads: cash, health, stars, ammo, speed, the
-// mission line, the message feed, and the live minimap. All DOM access
-// lives here; the game loop calls updateHud once a frame and this module
-// touches the DOM only where a value actually changed (the minimap
-// canvas is the one thing repainted every frame).
-import { CITY, COMBAT, PALETTE, CLOCK_START, MECHANIC } from './config.js';
-import { missionObjectiveText } from './missions.js';
+// mission line, the message feed, and the live minimap — plus the zone
+// label, which now follows the player around the town instead of sitting
+// still. All DOM access lives here; the game loop calls refreshHud once
+// a frame and this module touches the DOM only where a value actually
+// changed (the minimap canvas is the one thing repainted every frame).
+import { TOWN, GUN, COLORS, CLOCK_START, MECHANIC, ZONES } from './config.js';
+import { objectiveLine } from './missions.js';
 
-export function createHud() {
+export function newHud() {
   const byId = (id) => document.getElementById(id);
   return {
     el: {
@@ -21,20 +22,22 @@ export function createHud() {
       boostfill: byId('boostfill'),
       boostwrap: byId('boostwrap'),
       objective: byId('objtext'),
+      objectiveBox: byId('objective'),
       feed: byId('feed'),
       hint: byId('hint'),
       bust: byId('bustbar'),
       clock: byId('clock'),
       radio: byId('radio'),
       minimap: byId('minimap'),
+      loc: byId('loc'),
     },
     minimapCtx: null,
-    shown: { stars: -1, cash: -1, hp: -1, ammo: '', speed: -1, objective: '', clock: '' },
+    shown: { stars: -1, cash: -1, hp: -1, ammo: '', speed: -1, objective: '', clock: '', zone: '' },
     clockMin: CLOCK_START,
   };
 }
 
-export function addFeedMessage(hud, text, kind = 'info') {
+export function postFeed(hud, text, kind = 'info') {
   if (!hud.el.feed) return;
   const div = document.createElement('div');
   div.className = kind;
@@ -46,7 +49,7 @@ export function addFeedMessage(hud, text, kind = 'info') {
   }, 9000);
 }
 
-export function showHint(hud, text) {
+export function flashHint(hud, text) {
   if (!hud.el.hint) return;
   hud.el.hint.textContent = text;
   hud.el.hint.style.opacity = '1';
@@ -71,35 +74,54 @@ export function flashScreen(hud, kind) {
   }
 }
 
+// Which named district the player is standing in right now.
+export function zoneNameFor(pos) {
+  for (const z of ZONES) {
+    if (pos.x >= z.x0 && pos.x <= z.x1 && pos.z >= z.z0 && pos.z <= z.z1) return z.name;
+  }
+  return 'ZENITH';
+}
+
 // The minimap: valley haze and ridge shelf to the east, blocks and roads,
 // then the moving parts — traffic, cruisers (flashing), the mission
 // beacon, and Nadia's arrow, rotated to her heading.
-export function drawMinimap(G) {
+export function paintMinimap(G) {
   const hud = G.hud;
   const cv = hud.el.minimap;
   if (!cv) return;
   if (!hud.minimapCtx) hud.minimapCtx = cv.getContext('2d');
   const g = hud.minimapCtx;
   const S = cv.width;
-  const world = CITY.half * 2 + 90;
-  const mx = (x) => ((x + CITY.half) / world) * S;
-  const mz = (z) => ((z + CITY.half) / world) * S;
+  const world = TOWN.half * 2 + 90;
+  const mx = (x) => ((x + TOWN.half) / world) * S;
+  const mz = (z) => ((z + TOWN.half) / world) * S;
 
   g.fillStyle = '#20262c';
   g.fillRect(0, 0, S, S);
   // East edge: rock shelf, then the violet valley.
-  g.fillStyle = PALETTE.minimapSand;
-  g.fillRect(mx(CITY.beachX), 0, mx(CITY.waterX) - mx(CITY.beachX), S);
-  g.fillStyle = PALETTE.minimapSea;
-  g.fillRect(mx(CITY.waterX), 0, S - mx(CITY.waterX), S);
-  // City blocks.
+  g.fillStyle = COLORS.minimapSand;
+  g.fillRect(mx(TOWN.beachX), 0, mx(TOWN.waterX) - mx(TOWN.beachX), S);
+  g.fillStyle = COLORS.minimapSea;
+  g.fillRect(mx(TOWN.waterX), 0, S - mx(TOWN.waterX), S);
+  // City blocks (the plaza block reads as open stone).
   g.fillStyle = '#3a4148';
-  const blockPx = ((CITY.block - 16) / world) * S;
-  for (let bx = 0; bx < CITY.blocks; bx++) {
-    for (let bz = 0; bz < CITY.blocks; bz++) {
+  const blockPx = ((TOWN.block - 16) / world) * S;
+  for (let bx = 0; bx < TOWN.blocks; bx++) {
+    for (let bz = 0; bz < TOWN.blocks; bz++) {
+      if ((bx === 2 || bx === 3) && (bz === 2 || bz === 3)) {
+        g.fillStyle = '#6a6258';
+        g.fillRect(
+          mx(-TOWN.half + bx * TOWN.block + 10),
+          mz(-TOWN.half + bz * TOWN.block + 10),
+          blockPx,
+          blockPx,
+        );
+        g.fillStyle = '#3a4148';
+        continue;
+      }
       g.fillRect(
-        mx(-CITY.half + bx * CITY.block + 10),
-        mz(-CITY.half + bz * CITY.block + 10),
+        mx(-TOWN.half + bx * TOWN.block + 10),
+        mz(-TOWN.half + bz * TOWN.block + 10),
         blockPx,
         blockPx,
       );
@@ -107,7 +129,7 @@ export function drawMinimap(G) {
   }
   // Roads as filled strips.
   g.fillStyle = '#565e66';
-  const roadPx = Math.max(2, (CITY.streetWidth / world) * S);
+  const roadPx = Math.max(2, (TOWN.streetWidth / world) * S);
   for (const c of G.city.centers) {
     g.fillRect(mx(c) - roadPx / 2, 0, roadPx, S);
     g.fillRect(0, mz(c) - roadPx / 2, S, roadPx);
@@ -165,7 +187,7 @@ function setText(el, cache, key, value) {
   el.textContent = value;
 }
 
-export function updateHud(G, dt) {
+export function refreshHud(G, dt) {
   const hud = G.hud;
   const p = G.player;
   const shown = hud.shown;
@@ -203,7 +225,7 @@ export function updateHud(G, dt) {
     hud.el.ammo,
     shown,
     'ammo',
-    G.combat.reloading ? 'RELOADING…' : `AMMO ${G.combat.ammo} / ${COMBAT.magSize}`,
+    G.combat.reloading ? 'RELOADING…' : `AMMO ${G.combat.ammo} / ${GUN.magSize}`,
   );
 
   const kmh = p.onFoot ? p.speedKmh : Math.round(Math.abs(p.car ? p.car.speed * 3.6 : 0));
@@ -219,6 +241,17 @@ export function updateHud(G, dt) {
     hud.el.boostfill.style.width = showBoost ? Math.max(0, p.car.boost || 0) + '%' : '0%';
   }
 
-  setText(hud.el.objective, shown, 'objective', missionObjectiveText(G));
-  drawMinimap(G);
+  setText(hud.el.objective, shown, 'objective', objectiveLine(G));
+  // Timed jobs going short turn the objective box red.
+  const lowTime =
+    G.missions.state === 'active' && MISSIONS_LOW(G);
+  if (hud.el.objectiveBox) hud.el.objectiveBox.classList.toggle('urgent', lowTime);
+
+  setText(hud.el.loc, shown, 'zone', `ZENITH · ${zoneNameFor(p.pos)}`);
+
+  paintMinimap(G);
+}
+
+function MISSIONS_LOW(G) {
+  return G.missions.timer > 0 && G.missions.timer < 30;
 }

@@ -1,35 +1,45 @@
-// ZENITH — config.js (fresh rewrite, round 3)
-// Every number the rest of the game argues about lives here: the shape of
-// the town, how a car feels, what a crime costs, what the sky looks like.
-// The other modules import these tables and never invent their own tuning,
-// so balancing the whole game means editing this one file.
+// ZENITH — config.js (round 3 redo)
+// One file holds every number the game argues about: the shape of the
+// town, how a car feels, what a crime costs, what the sky looks like.
+// The other modules import these tables and never invent tuning of
+// their own, so rebalancing the whole game means editing this one file.
 
 export const GAME_TITLE = 'ZENITH';
 export const GAME_SUBTITLE = 'An open-world crime story in the mountain town of Zenith';
-export const SAVE_KEY = 'zenith-save-v2';
+export const SAVE_KEY = 'zenith-save-v3';
 
 // ---------------------------------------------------------------- the town
-// The street grid: BLOCKS_PER_SIDE squares of BLOCK_PITCH metres, roads on
-// the grid lines, buildings inside the squares. The built-up area spans
-// -half..+half on both axes; east of it the ridge road climbs past the
+// The street grid: GRID_SIDE squares of GRID_STEP metres, roads on the
+// grid lines, buildings inside the squares. The built-up area spans
+// -span..+span on both axes; east of it the ridge road climbs past the
 // observatory toward the valley haze, which is where the world ends.
-const BLOCKS_PER_SIDE = 6;
-const BLOCK_PITCH = 70;
-const GRID_HALF = (BLOCKS_PER_SIDE * BLOCK_PITCH) / 2; // 210
+const GRID_SIDE = 6;
+const GRID_STEP = 70;
+const SPAN = (GRID_SIDE * GRID_STEP) / 2; // 210
 
-export const CITY = Object.freeze({
-  blocks: BLOCKS_PER_SIDE,
-  block: BLOCK_PITCH,
+export const TOWN = Object.freeze({
+  blocks: GRID_SIDE,
+  block: GRID_STEP,
   streetWidth: 16,
-  half: GRID_HALF,
-  beachX: GRID_HALF + 16,   // ridge rock shelf begins (east edge)
-  waterX: GRID_HALF + 52,   // violet valley haze begins
-  boundX: GRID_HALF + 78,   // hard eastern bound, out on the shelf
-  boundZ: GRID_HALF + 18,   // hard bound on the other three sides
+  half: SPAN,
+  beachX: SPAN + 16,   // ridge rock shelf begins (east edge)
+  waterX: SPAN + 52,   // violet valley haze begins
+  boundX: SPAN + 78,   // hard eastern bound, out on the shelf
+  boundZ: SPAN + 18,   // hard bound on the other three sides
   fogNear: 120,
   fogFar: 380,
   sunIntensity: 1.9,
 });
+
+// Named districts, for the live zone label in the HUD. Checked in order;
+// the first box containing the player wins.
+export const ZONES = Object.freeze([
+  { name: 'RIDGE LODGE', x0: -228, x1: -140, z0: -228, z1: -120 },
+  { name: 'OBSERVATORY', x0: 110, x1: 190, z0: -190, z1: -110 },
+  { name: 'RIDGE ROAD', x0: TOWN.beachX, x1: TOWN.boundX, z0: -228, z1: 228 },
+  { name: 'SUMMIT PLAZA', x0: -45, x1: 45, z0: -45, z1: 45 },
+  { name: 'DOWNTOWN', x0: -228, x1: 228, z0: -228, z1: 228 },
+]);
 
 // ---------------------------------------------------------------- the story
 // Ridge Lodge is where every job starts and where the story ends.
@@ -67,7 +77,7 @@ export const MECHANIC = Object.freeze({
 });
 
 // ---------------------------------------------------------------- the hero
-export const PLAYER = Object.freeze({
+export const HERO = Object.freeze({
   walkSpeed: 6,
   runSpeed: 11,
   radius: 0.6,
@@ -80,7 +90,7 @@ export const PLAYER = Object.freeze({
 // ---------------------------------------------------------------- the cars
 // Arcade numbers, tuned for fun over realism: strong brakes, forgiving grip,
 // a handbrake that actually rotates the car.
-export const CAR = Object.freeze({
+export const DRIVE = Object.freeze({
   accel: 22,
   brake: 34,
   reverseMax: 12,
@@ -92,17 +102,18 @@ export const CAR = Object.freeze({
 });
 
 // Ambient population: how many cars cruise and how many people walk.
-export const TRAFFIC = Object.freeze({
-  carCount: 10,
+export const CROWD = Object.freeze({
+  carCount: 12,
   carSpeed: 9,
-  pedCount: 16,
+  pedCount: 18,
   pedSpeed: 1.6,
 });
 
 // ---------------------------------------------------------------- the law
 // Heat is priced per crime; stars cool down only after a quiet stretch
-// with no cruiser close enough to see you.
-export const WANTED = Object.freeze({
+// with no cruiser close enough to see you. A near miss at speed pays a
+// little danger money — threading traffic is a skill, after all.
+export const HEAT = Object.freeze({
   max: 5,
   decaySeconds: 26,
   bustDistance: 3.2, // a stopped cruiser this close, while you are on foot…
@@ -112,10 +123,14 @@ export const WANTED = Object.freeze({
   heatShoot: 1,
   heatKillCop: 2,
   heatRamCop: 1,
+  nearMissBonus: 25,
+  nearMissMinSpeed: 15,
+  nearMissGap: 2.6,
+  nearMissCooldown: 4,
 });
 
 // ---------------------------------------------------------------- the gun
-export const COMBAT = Object.freeze({
+export const GUN = Object.freeze({
   magSize: 12,
   reloadSeconds: 1.4,
   range: 90,
@@ -128,7 +143,7 @@ export const COMBAT = Object.freeze({
 
 // ---------------------------------------------------------------- the look
 // Dusk over the ridge: violet sky, warm sun, pastel towers.
-export const PALETTE = Object.freeze({
+export const COLORS = Object.freeze({
   sky: 0x8a7fc0,
   fog: 0x7a6fa8,
   sun: 0xffd9a0,
@@ -152,6 +167,8 @@ export const PALETTE = Object.freeze({
   hemiGround: 0x4a4448,
   minimapSea: '#8a7fb8',
   minimapSand: '#6a6a72',
+  plazaStone: 0x9a9484,
+  fountainWater: 0x6ab8d8,
 });
 
 // ---------------------------------------------------------------- the keys

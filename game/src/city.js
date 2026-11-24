@@ -1,45 +1,46 @@
-// ZENITH — city.js (fresh rewrite, round 3)
+// ZENITH — city.js (round 3 redo)
 // Builds the whole town out of primitives: the road grid, pavement strips,
 // pastel towers with lit windows, the observatory lodge, the dome on the
-// ridge, pines, cable-car pylons and streetlights. Everything procedural —
-// the only "asset" is a canvas texture painted at boot. Alongside the
-// meshes it returns the collision boxes and the intersection graph that
-// traffic and pedestrians navigate by.
+// ridge, pines, cable-car pylons, streetlights — and Summit Plaza, the
+// fountain square at the town centre. Everything procedural; the only
+// "asset" is a canvas texture painted at boot. Alongside the meshes it
+// returns the collision boxes and the intersection graph that traffic
+// and pedestrians navigate by.
 import * as THREE from 'three';
-import { CITY, PALETTE } from './config.js';
+import { TOWN, COLORS } from './config.js';
 
-// Xorshift32: tiny deterministic stream so the town is identical every boot
-// (and identical in the screenshots to what the player gets).
-function xorshift32(seed) {
-  let s = (seed >>> 0) || 0x9e3779b9;
+// Mulberry32: tiny deterministic stream so the town is identical every
+// boot (and identical in the screenshots to what the player gets).
+function mulberry32(seed) {
+  let a = seed >>> 0;
   return function next() {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    s >>>= 0;
-    return s / 4294967296;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
 // Paint one facade: base colour, a grid of windows, some of them lit warm
 // or cool. Each tower gets its own seed so no two facades repeat exactly.
-function facadeTexture(baseHex, seed) {
-  const rand = xorshift32(seed * 2654435761);
+function paintFacade(baseHex, seed) {
+  const rand = mulberry32(seed * 2246822519);
   const canvas = document.createElement('canvas');
-  canvas.width = 96;
-  canvas.height = 192;
+  canvas.width = 80;
+  canvas.height = 160;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = baseHex;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const cols = 4;
-  const rows = 10;
+  const cols = 5;
+  const rows = 8;
   const cellW = canvas.width / cols;
   const cellH = canvas.height / rows;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const roll = rand();
       ctx.fillStyle = roll < 0.3 ? '#ffd98a' : roll < 0.42 ? '#9ad4ff' : '#2c3a4a';
-      ctx.fillRect(c * cellW + 4, r * cellH + 4, cellW - 8, cellH - 8);
+      ctx.fillRect(c * cellW + 3, r * cellH + 3, cellW - 6, cellH - 6);
     }
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -48,16 +49,16 @@ function facadeTexture(baseHex, seed) {
 }
 
 // The x (and z) coordinate of every road centre line, west to east.
-export function streetCenters() {
+export function avenueLines() {
   const lines = [];
-  for (let i = 0; i <= CITY.blocks; i++) lines.push(-CITY.half + i * CITY.block);
+  for (let i = 0; i <= TOWN.blocks; i++) lines.push(-TOWN.half + i * TOWN.block);
   return lines;
 }
 
 const hexCss = (n) => `#${n.toString(16).padStart(6, '0')}`;
 
 // A flat plane lying on the ground, centred at (x, z), lifted `y` metres.
-function groundPlane(scene, w, d, color, x, y, z) {
+function flatSlab(scene, w, d, color, x, y, z) {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(w, d),
     new THREE.MeshLambertMaterial({ color }),
@@ -69,7 +70,7 @@ function groundPlane(scene, w, d, color, x, y, z) {
 }
 
 // One box, added to the scene, optionally registered as a collider.
-function addBox(scene, colliders, w, h, d, material, x, y, z, solid = false) {
+function putBox(scene, colliders, w, h, d, material, x, y, z, solid = false) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   mesh.position.set(x, y, z);
   scene.add(mesh);
@@ -79,24 +80,24 @@ function addBox(scene, colliders, w, h, d, material, x, y, z, solid = false) {
   return mesh;
 }
 
-export function buildCity(scene, seed = 20261118) {
-  const rand = xorshift32(seed);
+export function growTown(scene, seed = 20261124) {
+  const rand = mulberry32(seed);
   const colliders = [];
   const buildings = [];
-  const centers = streetCenters();
-  const road = CITY.streetWidth;
-  const half = CITY.half;
+  const centers = avenueLines();
+  const road = TOWN.streetWidth;
+  const half = TOWN.half;
   const span = half * 2 + road;
 
   // Far ground and the town slab it sits on.
-  groundPlane(scene, 900, 700, PALETTE.ground, 40, -0.05, 0);
-  groundPlane(scene, span, span, 0x7d838a, 0, 0, 0);
+  flatSlab(scene, 900, 700, COLORS.ground, 40, -0.05, 0);
+  flatSlab(scene, span, span, 0x7d838a, 0, 0, 0);
 
   // Roads on every grid line, with dashed centre markings.
   const dashMat = new THREE.MeshBasicMaterial({ color: 0xd8d8c8 });
   for (const c of centers) {
-    groundPlane(scene, road, span, PALETTE.asphalt, c, 0.01, 0);
-    groundPlane(scene, span, road, PALETTE.asphalt, 0, 0.01, c);
+    flatSlab(scene, road, span, COLORS.asphalt, c, 0.01, 0);
+    flatSlab(scene, span, road, COLORS.asphalt, 0, 0.01, c);
     for (let d = -half + 7; d < half; d += 14) {
       const dashV = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 5), dashMat);
       dashV.rotation.x = -Math.PI / 2;
@@ -112,35 +113,66 @@ export function buildCity(scene, seed = 20261118) {
   // Pavement strips flanking every road.
   for (const c of centers) {
     const off = road / 2 + 2;
-    groundPlane(scene, 4, span, PALETTE.sidewalk, c - off, 0.015, 0);
-    groundPlane(scene, 4, span, PALETTE.sidewalk, c + off, 0.015, 0);
-    groundPlane(scene, span, 4, PALETTE.sidewalk, 0, 0.015, c - off);
-    groundPlane(scene, span, 4, PALETTE.sidewalk, 0, 0.015, c + off);
+    flatSlab(scene, 4, span, COLORS.sidewalk, c - off, 0.015, 0);
+    flatSlab(scene, 4, span, COLORS.sidewalk, c + off, 0.015, 0);
+    flatSlab(scene, span, 4, COLORS.sidewalk, 0, 0.015, c - off);
+    flatSlab(scene, span, 4, COLORS.sidewalk, 0, 0.015, c + off);
+  }
+
+  // Summit Plaza: the middle block is a fountain square instead of
+  // towers — stone paving, a round basin, benches, and four pines.
+  const plazaMat = new THREE.MeshLambertMaterial({ color: COLORS.plazaStone });
+  flatSlab(scene, 54, 54, COLORS.plazaStone, 0, 0.02, 0);
+  const basin = new THREE.Mesh(
+    new THREE.CylinderGeometry(7, 7.6, 1.1, 18),
+    new THREE.MeshLambertMaterial({ color: 0x8a8578 }),
+  );
+  basin.position.set(0, 0.55, 0);
+  scene.add(basin);
+  const water = new THREE.Mesh(
+    new THREE.CylinderGeometry(6.2, 6.2, 0.4, 18),
+    new THREE.MeshLambertMaterial({ color: COLORS.fountainWater }),
+  );
+  water.position.set(0, 1.0, 0);
+  scene.add(water);
+  const jet = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.8, 3.4, 8),
+    new THREE.MeshLambertMaterial({ color: 0xd8d8e0 }),
+  );
+  jet.position.set(0, 2.6, 0);
+  scene.add(jet);
+  colliders.push({ minX: -7.6, maxX: 7.6, minZ: -7.6, maxZ: 7.6 });
+  const benchMat = new THREE.MeshLambertMaterial({ color: 0x6a4a2a });
+  for (const [bx, bz, ry] of [[-20, -20, 0.6], [20, -20, -0.6], [-20, 20, 2.5], [20, 20, -2.5]]) {
+    const bench = putBox(scene, colliders, 4, 0.5, 1.2, benchMat, bx, 0.5, bz, true);
+    bench.rotation.y = ry;
   }
 
   // Towers: each block is quartered into lots; most lots get a tower set
   // back from the pavement, heights skewed low with the odd tall one.
+  // The four central blocks stay empty: that is Summit Plaza.
   const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a5f66 });
-  let facadeSeed = 11;
-  for (let bx = 0; bx < CITY.blocks; bx++) {
-    for (let bz = 0; bz < CITY.blocks; bz++) {
-      const blockX = -half + bx * CITY.block;
-      const blockZ = -half + bz * CITY.block;
+  let facadeSeed = 101;
+  for (let bx = 0; bx < TOWN.blocks; bx++) {
+    for (let bz = 0; bz < TOWN.blocks; bz++) {
+      if ((bx === 2 || bx === 3) && (bz === 2 || bz === 3)) continue;
+      const blockX = -half + bx * TOWN.block;
+      const blockZ = -half + bz * TOWN.block;
       for (let lx = 0; lx < 2; lx++) {
         for (let lz = 0; lz < 2; lz++) {
           if (rand() < 0.22) continue; // empty lot: a car park, a gap
-          const lotX = blockX + road / 2 + lx * ((CITY.block - road) / 2);
-          const lotZ = blockZ + road / 2 + lz * ((CITY.block - road) / 2);
-          const lotSize = (CITY.block - road) / 2;
+          const lotX = blockX + road / 2 + lx * ((TOWN.block - road) / 2);
+          const lotZ = blockZ + road / 2 + lz * ((TOWN.block - road) / 2);
+          const lotSize = (TOWN.block - road) / 2;
           const w = 12 + rand() * (lotSize - 16);
           const d = 12 + rand() * (lotSize - 16);
           const h = 11 + rand() * rand() * 52;
           const cx = lotX + lotSize / 2 + (rand() - 0.5) * 3;
           const cz = lotZ + lotSize / 2 + (rand() - 0.5) * 3;
-          const paint = PALETTE.building[Math.floor(rand() * PALETTE.building.length)];
-          const wall = new THREE.MeshLambertMaterial({ map: facadeTexture(hexCss(paint), facadeSeed++) });
-          const tower = addBox(scene, colliders, w, h, d, wall, cx, h / 2, cz, true);
-          addBox(scene, colliders, w + 1, 0.8, d + 1, roofMat, cx, h + 0.4, cz);
+          const paint = COLORS.building[Math.floor(rand() * COLORS.building.length)];
+          const wall = new THREE.MeshLambertMaterial({ map: paintFacade(hexCss(paint), facadeSeed++) });
+          const tower = putBox(scene, colliders, w, h, d, wall, cx, h / 2, cz, true);
+          putBox(scene, colliders, w + 1, 0.8, d + 1, roofMat, cx, h + 0.4, cz);
           buildings.push(tower);
         }
       }
@@ -149,7 +181,7 @@ export function buildCity(scene, seed = 20261118) {
 
   // Ridge Lodge — the mission hub. Low stone lodge, pitched roof, lit sign.
   const lodgeMat = new THREE.MeshLambertMaterial({ color: 0x7a7568 });
-  addBox(scene, colliders, 26, 9, 18, lodgeMat, -186, 4.5, -168, true);
+  putBox(scene, colliders, 26, 9, 18, lodgeMat, -186, 4.5, -168, true);
   const roofL = new THREE.Mesh(new THREE.BoxGeometry(27, 0.5, 10), roofMat);
   roofL.position.set(-186, 10.2, -172.4);
   roofL.rotation.x = 0.42;
@@ -208,23 +240,25 @@ export function buildCity(scene, seed = 20261118) {
   dish.rotation.x = -Math.PI / 4;
   scene.add(dish);
 
-  // Pines along the ridge shelf, two staggered rows.
+  // Pines along the ridge shelf, two staggered rows, plus the plaza four.
   const palms = [];
-  const trunkMat = new THREE.MeshLambertMaterial({ color: PALETTE.palmTrunk });
-  const crownMat = new THREE.MeshLambertMaterial({ color: PALETTE.palmLeaf });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: COLORS.palmTrunk });
+  const crownMat = new THREE.MeshLambertMaterial({ color: COLORS.palmLeaf });
+  function plantPine(tx, tz) {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4, 6), trunkMat);
+    trunk.position.set(tx, 2, tz);
+    scene.add(trunk);
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(2.6, 8, 7), crownMat);
+    crown.position.set(tx, 8, tz);
+    scene.add(crown);
+    palms.push(trunk);
+  }
   for (let z = -200; z <= 200; z += 20) {
     for (const px of [214, 222]) {
-      const tx = px + rand() * 2;
-      const tz = z + rand() * 4;
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4, 6), trunkMat);
-      trunk.position.set(tx, 2, tz);
-      scene.add(trunk);
-      const crown = new THREE.Mesh(new THREE.ConeGeometry(2.6, 8, 7), crownMat);
-      crown.position.set(tx, 8, tz);
-      scene.add(crown);
-      palms.push(trunk);
+      plantPine(px + rand() * 2, z + rand() * 4);
     }
   }
+  for (const [px, pz] of [[-24, -24], [24, -24], [-24, 24], [24, 24]]) plantPine(px, pz);
 
   // Cable-car pylons marching down the central avenue, cable strung between.
   const pylonMat = new THREE.MeshLambertMaterial({ color: 0x3a3f45 });
@@ -260,13 +294,13 @@ export function buildCity(scene, seed = 20261118) {
   }
 
   // The ridge shelf, the violet valley beyond it, and two overlook decks.
-  groundPlane(scene, 60, half * 2 + 60, PALETTE.sand, CITY.beachX + 16, 0.02, 0);
-  groundPlane(scene, 220, 700, PALETTE.sea, CITY.waterX + 110, 0.0, 0);
+  flatSlab(scene, 60, half * 2 + 60, COLORS.sand, TOWN.beachX + 16, 0.02, 0);
+  flatSlab(scene, 220, 700, COLORS.sea, TOWN.waterX + 110, 0.0, 0);
   const deckMat = new THREE.MeshLambertMaterial({ color: 0x5a5a6a });
   for (const pz of [-70, 60]) {
-    addBox(scene, colliders, 46, 1, 8, deckMat, CITY.beachX + 30, 0.6, pz);
-    addBox(scene, colliders, 46, 0.3, 0.4, deckMat, CITY.beachX + 30, 1.6, pz - 3.8);
-    addBox(scene, colliders, 46, 0.3, 0.4, deckMat, CITY.beachX + 30, 1.6, pz + 3.8);
+    putBox(scene, colliders, 46, 1, 8, deckMat, TOWN.beachX + 30, 0.6, pz);
+    putBox(scene, colliders, 46, 0.3, 0.4, deckMat, TOWN.beachX + 30, 1.6, pz - 3.8);
+    putBox(scene, colliders, 46, 0.3, 0.4, deckMat, TOWN.beachX + 30, 1.6, pz + 3.8);
   }
 
   // The road graph: every intersection, for traffic to cruise between.
@@ -280,7 +314,7 @@ export function buildCity(scene, seed = 20261118) {
 // Resolves the deepest overlap first, then re-checks, so a circle wedged
 // in a corner between two towers still ends up outside both. Returns true
 // when anything was pushed (callers use that to detect a wall hit).
-export function collideCircle(pos, radius, colliders) {
+export function pushOutOfWalls(pos, radius, colliders) {
   let pushed = false;
   for (let pass = 0; pass < 3; pass++) {
     let deepest = null;

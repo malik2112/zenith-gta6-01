@@ -1,18 +1,20 @@
-// ZENITH — selftest.js (fresh rewrite, round 3)
+// ZENITH — selftest.js (round 3 redo)
 // Proof without a human: ?selftest=1 drives the real game through its
 // real functions — start, steal a car, drive it, raise the wanted
-// level, finish a mission, save and reload, fire the pistol, paint the
-// minimap — and writes PASS/FAIL lines into #selftest and the document
-// title for headless checks.
-import { addHeat } from './wanted.js';
-import { startMission, MISSIONS } from './missions.js';
-import { fireWeapon } from './combat.js';
-import { saveGame, loadSave } from './save.js';
-import { spawnPed } from './pedestrians.js';
+// level, finish a mission, save and reload, fire the pistol (checking
+// the recoil kick lands), paint the minimap, and confirm the zone label
+// follows the player — and writes PASS/FAIL lines into #selftest and
+// the document title for headless checks.
+import { raiseHeat } from './wanted.js';
+import { beginJob, MISSIONS } from './missions.js';
+import { shoot } from './combat.js';
+import { storeSave, fetchSave } from './save.js';
+import { summonWalker } from './pedestrians.js';
+import { zoneNameFor } from './hud.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function nearestTrafficCar(G) {
+function closestTrafficCar(G) {
   let best = null;
   let bestDist = Infinity;
   for (const car of G.cars) {
@@ -26,10 +28,10 @@ function nearestTrafficCar(G) {
   return best;
 }
 
-export async function runSelfTest(G) {
+export async function runChecks(G) {
   const results = [];
   const el = document.getElementById('selftest');
-  const record = (name, ok, detail = '') => {
+  const log = (name, ok, detail = '') => {
     results.push({ name, ok, detail });
     const line = `${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`;
     if (el) {
@@ -41,22 +43,22 @@ export async function runSelfTest(G) {
   };
 
   // Each step is [name, async fn]; a step records its own verdicts.
-  const steps = [
+  const checks = [
     ['boot', async () => {
-      record('boot', !!G.renderer && G.scene.children.length > 60, `${G.scene.children.length} scene objects`);
+      log('boot', !!G.renderer && G.scene.children.length > 60, `${G.scene.children.length} scene objects`);
     }],
     ['start', async () => {
-      G.startGame(true);
+      G.beginGame(true);
       await sleep(300);
-      record('start', G.mode === 'playing', 'mode=' + G.mode);
+      log('start', G.mode === 'playing', 'mode=' + G.mode);
     }],
     ['steal-car', async () => {
-      const car = nearestTrafficCar(G);
+      const car = closestTrafficCar(G);
       if (car) {
         G.player.pos.set(car.pos.x + 2, 0, car.pos.z);
-        G.tryEnterCar();
+        G.tryClimbIn();
       }
-      record('steal-car', !G.player.onFoot && G.player.car === car, car ? `entered car #${car.id}` : 'no car found');
+      log('steal-car', !G.player.onFoot && G.player.car === car, car ? `entered car #${car.id}` : 'no car found');
     }],
     ['drive', async () => {
       // Hold W until the car has really moved (up to 6 s). A fixed 2 s
@@ -72,49 +74,50 @@ export async function runSelfTest(G) {
         if (moved > 5) break;
       }
       G.input.up = false;
-      record('drive', moved > 5, `moved ${moved.toFixed(1)}m`);
+      log('drive', moved > 5, `moved ${moved.toFixed(1)}m`);
     }],
     ['wanted', async () => {
-      addHeat(G, 2, 'selftest');
+      raiseHeat(G, 2, 'selftest');
       await sleep(600);
-      record('wanted', G.wanted.level >= 2, `level=${G.wanted.level}`);
-      record('police-respond', G.wanted.police.length >= 1, `${G.wanted.police.length} cruisers`);
+      log('wanted', G.wanted.level >= 2, `level=${G.wanted.level}`);
+      log('police-respond', G.wanted.police.length >= 1, `${G.wanted.police.length} cruisers`);
     }],
     ['mission', async () => {
-      G.exitCar();
-      if (G.missions.state !== 'active') startMission(G, 0);
+      G.climbOut();
+      if (G.missions.state !== 'active') beginJob(G, 0);
       const cashBefore = G.player.cash;
       const missionBefore = G.missions.index;
       // Mission 1 completes with the player IN a car at the target.
-      const car = nearestTrafficCar(G);
+      const car = closestTrafficCar(G);
       if (car) {
         G.player.pos.set(car.pos.x + 2, 0, car.pos.z);
-        G.tryEnterCar();
+        G.tryClimbIn();
         car.pos.set(MISSIONS[0].target.x, 0, MISSIONS[0].target.z);
         car.mesh.position.copy(car.pos);
         G.player.pos.copy(car.pos);
       }
       await sleep(400);
-      record('mission-complete', G.missions.index === missionBefore + 1, `mission ${missionBefore + 1} -> ${G.missions.index + 1}`);
-      record('mission-reward', G.player.cash >= cashBefore + MISSIONS[0].reward, `$${cashBefore} -> $${G.player.cash}`);
+      log('mission-complete', G.missions.index === missionBefore + 1, `mission ${missionBefore + 1} -> ${G.missions.index + 1}`);
+      log('mission-reward', G.player.cash >= cashBefore + MISSIONS[0].reward, `$${cashBefore} -> $${G.player.cash}`);
     }],
     ['save-load', async () => {
-      saveGame(G);
-      const loaded = loadSave();
-      record('save-load', !!loaded && loaded.cash === G.player.cash, loaded ? `cash $${loaded.cash}` : 'no save found');
+      storeSave(G);
+      const loaded = fetchSave();
+      log('save-load', !!loaded && loaded.cash === G.player.cash, loaded ? `cash $${loaded.cash}` : 'no save found');
     }],
     ['shoot', async () => {
-      G.exitCar();
-      const ped = spawnPed(G.scene, G.player.pos.x + 6, G.player.pos.z, Math.random);
+      G.climbOut();
+      const ped = summonWalker(G.scene, G.player.pos.x + 6, G.player.pos.z, Math.random);
       ped.hp = 50;
       G.peds.push(ped);
       G.camera.position.set(G.player.pos.x, 1.7, G.player.pos.z);
       G.camera.lookAt(ped.pos.x, 1.2, ped.pos.z);
       const ammoBefore = G.combat.ammo;
       const hpBefore = ped.hp;
-      fireWeapon(G, [ped]);
+      shoot(G, [ped]);
       await sleep(120);
-      record('shoot', G.combat.ammo === ammoBefore - 1 && ped.hp < hpBefore, `ammo ${ammoBefore}->${G.combat.ammo}, ped hp ${hpBefore}->${ped.hp}`);
+      log('shoot', G.combat.ammo === ammoBefore - 1 && ped.hp < hpBefore, `ammo ${ammoBefore}->${G.combat.ammo}, ped hp ${hpBefore}->${ped.hp}`);
+      log('recoil', (G.recoil || 0) > 0, `recoil=${(G.recoil || 0).toFixed(3)}`);
     }],
     ['minimap', async () => {
       const cv = G.hud.el.minimap;
@@ -124,17 +127,22 @@ export async function runSelfTest(G) {
       for (let i = 0; i < data.length; i += 400) {
         if (data[i] !== 32 || data[i + 1] !== 38 || data[i + 2] !== 44) nonBg++;
       }
-      record('minimap', nonBg > 5, `${nonBg} non-background samples`);
+      log('minimap', nonBg > 5, `${nonBg} non-background samples`);
+    }],
+    ['zone-label', async () => {
+      const zone = zoneNameFor(G.player.pos);
+      const shown = (document.getElementById('loc') || {}).textContent || '';
+      log('zone-label', zone.length > 0 && shown.includes(zone), `zone=${zone}, label="${shown}"`);
     }],
     ['exit-car', async () => {
-      record('exit-car', G.player.onFoot === true, 'onFoot=' + G.player.onFoot);
+      log('exit-car', G.player.onFoot === true, 'onFoot=' + G.player.onFoot);
     }],
   ];
 
   try {
-    for (const [, run] of steps) await run();
+    for (const [, run] of checks) await run();
   } catch (e) {
-    record('exception', false, String((e && e.message) || e));
+    log('exception', false, String((e && e.message) || e));
   }
 
   const passed = results.filter((r) => r.ok).length;

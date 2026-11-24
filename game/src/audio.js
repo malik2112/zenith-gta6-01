@@ -1,8 +1,9 @@
-// ZENITH — audio.js (fresh rewrite, round 3)
+// ZENITH — audio.js (round 3 redo)
 // Every sound is synthesised live with WebAudio — no files, no network.
 // Short effects are one-shot oscillators and filtered noise; the engine
 // is a pair of detuned oscillators whose pitch and brightness follow the
-// speed; the siren is a triangle wave swept by an LFO; the radio is a
+// speed; the siren is a triangle wave swept by an LFO, and its loudness
+// now follows how close the nearest cruiser is; the radio is a
 // step-sequenced bassline with hats and a soft pad.
 export class SoundEngine {
   constructor() {
@@ -37,7 +38,7 @@ export class SoundEngine {
   }
 
   // One shared second of white noise, reused by every noise effect.
-  noiseBuffer() {
+  noiseBank() {
     if (!this.noiseCache) {
       const len = this.ctx.sampleRate;
       this.noiseCache = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
@@ -47,7 +48,7 @@ export class SoundEngine {
     return this.noiseCache;
   }
 
-  tone(freq, dur, { type = 'sine', vol = 0.2, slideTo = 0, delay = 0 } = {}) {
+  note(freq, dur, { type = 'sine', vol = 0.2, slideTo = 0, delay = 0 } = {}) {
     if (!this.ready) return;
     const t = this.ctx.currentTime + delay;
     const osc = this.ctx.createOscillator();
@@ -62,11 +63,11 @@ export class SoundEngine {
     osc.stop(t + dur + 0.02);
   }
 
-  noiseBurst(dur, { vol = 0.3, cutoff = 1000, kind = 'lowpass', delay = 0 } = {}) {
+  hiss(dur, { vol = 0.3, cutoff = 1000, kind = 'lowpass', delay = 0 } = {}) {
     if (!this.ready) return;
     const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer();
+    src.buffer = this.noiseBank();
     src.loop = true;
     const filter = this.ctx.createBiquadFilter();
     filter.type = kind;
@@ -80,48 +81,53 @@ export class SoundEngine {
   }
 
   // A little arpeggio helper for the musical stingers.
-  arpeggio(freqs, { type = 'sine', vol = 0.2, step = 0.09, dur = 0.22 } = {}) {
-    freqs.forEach((f, i) => this.tone(f, dur, { type, vol, delay: i * step }));
+  riff(freqs, { type = 'sine', vol = 0.2, step = 0.09, dur = 0.22 } = {}) {
+    freqs.forEach((f, i) => this.note(f, dur, { type, vol, delay: i * step }));
   }
 
   shot() {
-    this.noiseBurst(0.16, { vol: 0.5, cutoff: 1800, kind: 'highpass' });
-    this.tone(160, 0.1, { type: 'square', vol: 0.25, slideTo: 60 });
+    this.hiss(0.16, { vol: 0.5, cutoff: 1800, kind: 'highpass' });
+    this.note(160, 0.1, { type: 'square', vol: 0.25, slideTo: 60 });
   }
   dryClick() {
-    this.tone(1200, 0.05, { type: 'square', vol: 0.12 });
+    this.note(1200, 0.05, { type: 'square', vol: 0.12 });
   }
   reload() {
-    this.tone(500, 0.06, { type: 'square', vol: 0.15 });
-    this.tone(700, 0.06, { type: 'square', vol: 0.15, delay: 0.12 });
+    this.note(500, 0.06, { type: 'square', vol: 0.15 });
+    this.note(700, 0.06, { type: 'square', vol: 0.15, delay: 0.12 });
   }
   chime() {
-    this.arpeggio([523, 659, 784], { type: 'sine', vol: 0.22 });
+    this.riff([523, 659, 784], { type: 'sine', vol: 0.22 });
   }
   cash() {
-    this.arpeggio([880, 1174, 1568], { type: 'triangle', vol: 0.2, step: 0.07, dur: 0.16 });
+    this.riff([880, 1174, 1568], { type: 'triangle', vol: 0.2, step: 0.07, dur: 0.16 });
   }
   thud() {
-    this.noiseBurst(0.12, { vol: 0.4, cutoff: 300 });
-    this.tone(90, 0.12, { vol: 0.3, slideTo: 45 });
+    this.hiss(0.12, { vol: 0.4, cutoff: 300 });
+    this.note(90, 0.12, { vol: 0.3, slideTo: 45 });
   }
   crash() {
-    this.noiseBurst(0.35, { vol: 0.55, cutoff: 500 });
-    this.tone(70, 0.3, { vol: 0.35, slideTo: 35 });
+    this.hiss(0.35, { vol: 0.55, cutoff: 500 });
+    this.note(70, 0.3, { vol: 0.35, slideTo: 35 });
   }
   door() {
-    this.noiseBurst(0.08, { vol: 0.25, cutoff: 900 });
+    this.hiss(0.08, { vol: 0.25, cutoff: 900 });
   }
   // A two-tone car horn: two squares a minor third apart, short and rude.
   horn() {
-    this.tone(392, 0.28, { type: 'square', vol: 0.18 });
-    this.tone(494, 0.28, { type: 'square', vol: 0.14 });
+    this.note(392, 0.28, { type: 'square', vol: 0.18 });
+    this.note(494, 0.28, { type: 'square', vol: 0.14 });
   }
   busted() {
-    this.arpeggio([392, 330, 262], { type: 'sawtooth', vol: 0.16, step: 0.22, dur: 0.35 });
+    this.riff([392, 330, 262], { type: 'sawtooth', vol: 0.16, step: 0.22, dur: 0.35 });
   }
   missionStart() {
-    this.arpeggio([262, 392, 523], { type: 'triangle', vol: 0.2, step: 0.1, dur: 0.2 });
+    this.riff([262, 392, 523], { type: 'triangle', vol: 0.2, step: 0.1, dur: 0.2 });
+  }
+  // Two sharp beeps for the low-time warning on timed jobs.
+  beep() {
+    this.note(980, 0.09, { type: 'square', vol: 0.16 });
+    this.note(980, 0.09, { type: 'square', vol: 0.16, delay: 0.14 });
   }
 
   // Engine: a sawtooth plus a square sub-oscillator an octave down,
@@ -171,7 +177,8 @@ export class SoundEngine {
   }
 
   // Siren: one triangle oscillator, its frequency wobbled by a square
-  // LFO between the two classic tones — no timers involved.
+  // LFO between the two classic tones — no timers involved. The gain
+  // node is kept so sirenSet() can ride the volume with distance.
   sirenStart() {
     if (!this.ready || this.sirenNodes) return;
     const osc = this.ctx.createOscillator();
@@ -188,7 +195,16 @@ export class SoundEngine {
     osc.connect(gain).connect(this.master);
     osc.start();
     lfo.start();
-    this.sirenNodes = { osc, lfo };
+    this.sirenNodes = { osc, lfo, gain };
+  }
+
+  // `dist` is the distance to the nearest cruiser in metres: loud up
+  // close, a whisper past ~120 m.
+  sirenSet(dist) {
+    if (!this.sirenNodes) return;
+    const d = Number.isFinite(dist) ? dist : 120;
+    const vol = Math.max(0.012, 0.06 - (Math.min(d, 120) / 120) * 0.048);
+    this.sirenNodes.gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.2);
   }
 
   sirenStop() {
@@ -216,10 +232,10 @@ export class SoundEngine {
       if (!this.ctx || !this.musicOn) return;
       const step = this.musicStep % bass.length;
       const f = bass[step];
-      if (f) this.tone(f, stepDur * 0.95, { type: 'triangle', vol: 0.16 });
-      if (step % 4 === 2) this.noiseBurst(0.03, { vol: 0.05, cutoff: 6000, kind: 'highpass' });
-      if (step === 0) this.tone(146.8, 1.6, { vol: 0.05 });
-      if (step === 16) this.tone(174.6, 1.6, { vol: 0.05 });
+      if (f) this.note(f, stepDur * 0.95, { type: 'triangle', vol: 0.16 });
+      if (step % 4 === 2) this.hiss(0.03, { vol: 0.05, cutoff: 6000, kind: 'highpass' });
+      if (step === 0) this.note(146.8, 1.6, { vol: 0.05 });
+      if (step === 16) this.note(174.6, 1.6, { vol: 0.05 });
       this.musicStep++;
     }, stepDur * 1000);
   }

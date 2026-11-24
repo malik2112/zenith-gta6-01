@@ -22,23 +22,32 @@ story, music — is original fiction; no part of any commercial game is used.
 
 - **A whole town, procedurally built**: a 6×6-block grid of pastel towers
   with lit windows, an observatory dome and radio dish, cable-car pylons,
-  pine rows along the ridge shelf, and the violet valley beyond.
+  pine rows along the ridge shelf, the violet valley beyond — and Summit
+  Plaza, a fountain square with benches at the town centre.
 - **Drive anything**: traffic cruises the road graph in its lane; walk up
   to any car and press **E** to take it. Arcade handling with a real
   drift model — the car has a facing and a direction of travel, and grip
-  pulls one back in line with the other.
+  pulls one back in line with the other. Brake lights flare when you
+  brake; the camera's field of view widens as speed builds.
+- **Near misses pay**: thread traffic at speed without touching it and
+  each close pass earns **+$25** of danger money.
 - **Signature mechanic — RIDGE ICE**: the east ridge road past the
   observatory is polished rock and morning ice. Steering bites late and
   every slide lasts longer. Easy does it.
 - **Wanted system**: steal, run someone down, or open fire and the stars
   climb. Ridge PD cruisers dispatch from real roads, lead their target
   to intercept you, ram, and bust you on foot. Lay low and the heat cools.
-- **Combat**: a 12-round pistol with tracers, muzzle flash and reloads;
-  rival crew who fire in bursts and shoot back.
-- **People**: walkers stroll the pavements, pause at corners, and sprint
-  away from gunfire or a car coming too fast.
+  The siren gets louder as the nearest cruiser closes in.
+- **Combat**: a 12-round pistol with tracers, muzzle flash, reloads, and
+  a small camera kick on every shot; rival crew who fire in bursts and
+  shoot back.
+- **People**: walkers stroll the pavements, pause at corners, stop to
+  chat with each other, and sprint away from gunfire or a car coming
+  too fast.
 - **HUD**: cash, health, wanted stars, a live minimap with traffic and
-  cruiser blips, mission objective, speed, ammo, an in-game clock, and a
+  cruiser blips, a mission objective that turns red (with a warning
+  beep) when a timed job gets short, a live zone label that names the
+  district you're standing in, speed, ammo, an in-game clock, and a
   synth radio (SUMMIT FM 94.7) generated live with WebAudio.
 - **Save**: progress persists in localStorage; Continue resumes at the lodge.
 
@@ -50,6 +59,7 @@ story, music — is original fiction; no part of any commercial game is used.
 | Mouse | Look around (click to lock) |
 | Shift | Sprint |
 | E | Enter / exit / steal a car |
+| F | Horn (in car) — scatters pedestrians |
 | Space | Handbrake (in car) |
 | Click | Fire pistol |
 | R | Reload |
@@ -61,22 +71,22 @@ story, music — is original fiction; no part of any commercial game is used.
 
 - `game/index.html` — the page, HUD and menus
 - `game/src/main.js` — boot, the frame loop, input, car enter/exit, end flows
-- `game/src/config.js` — every tuning number, the palette, the story text
-- `game/src/city.js` — the procedural town, collisions, the road graph
-- `game/src/vehicles.js` — car meshes, the drift driving model, traffic and police AI
-- `game/src/pedestrians.js` — the figure builder and the walker state machine
-- `game/src/player.js` — on-foot movement and the third-person camera
+- `game/src/config.js` — every tuning number, the palette, the story text, the district zones
+- `game/src/city.js` — the procedural town (incl. Summit Plaza), collisions, the road graph
+- `game/src/vehicles.js` — car meshes, the drift driving model, traffic and police AI, near misses
+- `game/src/pedestrians.js` — the figure builder and the walker state machine (incl. chatting)
+- `game/src/player.js` — on-foot movement and the third-person camera (FOV kick, recoil)
 - `game/src/combat.js` — the pistol, tracers, rival bursts
-- `game/src/wanted.js` — heat, stars, cruiser dispatch, the bust
-- `game/src/missions.js` — the five-job story and its beacons
-- `game/src/hud.js` — HUD readouts and the live minimap
-- `game/src/save.js` — localStorage save/load
+- `game/src/wanted.js` — heat, stars, cruiser dispatch, the bust, distance-based siren
+- `game/src/missions.js` — the five-job story, its beacons, and the low-time warning
+- `game/src/hud.js` — HUD readouts, the live minimap, and the zone label
+- `game/src/save.js` — localStorage save/load (format v3)
 - `game/src/audio.js` — all sound synthesised with WebAudio, no audio files
 - `game/src/shots.js` — staged scenes for the screenshots (`?shot=start|street|drive|mission`)
 - `game/src/selftest.js` — a headless play-through check (`?selftest=1`)
 - `game/vendor/three/three.module.min.js` — three.js (MIT), vendored
 - `main.ts` — the make.fun entrypoint: copies `game/` and `screenshots/` out and writes the dossier
-- `serve.ts` — a tiny static server for local play
+- `serve.ts` — a tiny static server for local play (`--port`, `--host`)
 
 ## License
 

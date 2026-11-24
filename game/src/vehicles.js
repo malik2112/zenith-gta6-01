@@ -1,18 +1,20 @@
-// ZENITH — vehicles.js (fresh rewrite, round 3)
+// ZENITH — vehicles.js (round 3 redo)
 // Everything with wheels: how a car looks, how the player's car drives
 // (throttle, brakes, steering, handbrake, and the ridge-ice drift), how
 // traffic cruises the intersection graph in its lane, and how a cruiser
 // cuts the corner to intercept you. Arcade, not simulation — but the
 // drift model is real: the car has a facing and a direction of travel,
 // and grip is what pulls the second back in line with the first.
+// New here: brake lights that flare when you brake, and a near-miss
+// bonus for threading traffic at speed.
 import * as THREE from 'three';
-import { CAR, PALETTE, CITY, MECHANIC } from './config.js';
-import { collideCircle } from './city.js';
+import { DRIVE, COLORS, TOWN, MECHANIC, HEAT } from './config.js';
+import { pushOutOfWalls } from './city.js';
 
 let nextCarId = 0;
 
 // ------------------------------------------------------------------ meshes
-export function makeCarMesh(color, isPolice = false) {
+export function buildCarBody(color, isPolice = false) {
   const group = new THREE.Group();
   const paint = new THREE.MeshLambertMaterial({ color });
   const trim = new THREE.MeshLambertMaterial({ color: 0x1a2027 });
@@ -33,6 +35,10 @@ export function makeCarMesh(color, isPolice = false) {
   const roof = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 2.3), paint);
   roof.position.set(0, 1.4, -0.2);
   group.add(roof);
+  // A hood scoop so the player's car reads at a glance in traffic.
+  const scoop = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.14, 1.1), trim);
+  scoop.position.set(0, 0.92, 1.1);
+  group.add(scoop);
   // Mirrors on stalks.
   for (const sx of [-1.08, 1.08]) {
     const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.22), trim);
@@ -40,7 +46,8 @@ export function makeCarMesh(color, isPolice = false) {
     group.add(mirror);
   }
   const headMat = new THREE.MeshBasicMaterial({ color: 0xfff6c8 });
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a22 });
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0x881111 });
+  const tails = [];
   for (const sx of [-0.7, 0.7]) {
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), headMat);
     head.position.set(sx, 0.6, 2.21);
@@ -48,6 +55,7 @@ export function makeCarMesh(color, isPolice = false) {
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), tailMat);
     tail.position.set(sx, 0.6, -2.21);
     group.add(tail);
+    tails.push(tail);
   }
   const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 10);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x14181c });
@@ -83,11 +91,11 @@ export function makeCarMesh(color, isPolice = false) {
     group.add(bar);
     lightBar = { red, blue };
   }
-  return { group, wheels, lightBar };
+  return { group, wheels, lightBar, tails };
 }
 
-export function spawnCar(scene, x, z, yaw, color, kind = 'traffic') {
-  const { group, wheels, lightBar } = makeCarMesh(color, kind === 'police');
+export function summonCar(scene, x, z, yaw, color, kind = 'traffic') {
+  const { group, wheels, lightBar, tails } = buildCarBody(color, kind === 'police');
   group.position.set(x, 0, z);
   group.rotation.y = yaw;
   scene.add(group);
@@ -97,6 +105,7 @@ export function spawnCar(scene, x, z, yaw, color, kind = 'traffic') {
     mesh: group,
     wheels,
     lightBar,
+    tails,
     pos: new THREE.Vector3(x, 0, z),
     yaw,
     velAngle: yaw, // direction of travel; lags yaw while drifting
@@ -110,6 +119,7 @@ export function spawnCar(scene, x, z, yaw, color, kind = 'traffic') {
     lastPos: new THREE.Vector3(x, 0, z),
     alive: true,
     flashT: Math.random() * 10,
+    nmSeen: {}, // near-miss cooldowns, keyed by other car id
   };
 }
 
@@ -131,6 +141,13 @@ function angleDelta(from, to) {
   return d;
 }
 
+// Brake lights flare while the brakes are on, dim otherwise.
+export function setBrakeLights(car, braking) {
+  if (!car.tails) return;
+  const hex = braking ? 0xff2a22 : 0x881111;
+  for (const tail of car.tails) tail.material.color.setHex(hex);
+}
+
 // ----------------------------------------------------------------- traffic
 // Traffic keeps to the right-hand lane: the waypoint is the intersection
 // centre shifted sideways, perpendicular to the direction of travel.
@@ -142,7 +159,7 @@ function laneWaypoint(car, node) {
   return { x: node.x + (dz / len) * lane, z: node.z - (dx / len) * lane };
 }
 
-function chooseNextNode(car, nodes, rng) {
+function pickNextNode(car, nodes, rng) {
   // Stay on the road graph: next node shares the current street.
   const alongX = nodes.filter((n) => Math.abs(n.x - car.pos.x) < 6 && Math.abs(n.z - car.pos.z) > 1);
   const alongZ = nodes.filter((n) => Math.abs(n.z - car.pos.z) < 6 && Math.abs(n.x - car.pos.x) > 1);
@@ -150,12 +167,12 @@ function chooseNextNode(car, nodes, rng) {
   car.target = laneWaypoint(car, pool[Math.floor(rng() * pool.length)]);
 }
 
-export function updateTrafficCar(car, nodes, rng, dt, allCars, colliders) {
-  if (!car.target) chooseNextNode(car, nodes, rng);
+export function cruiseTraffic(car, nodes, rng, dt, allCars, colliders) {
+  if (!car.target) pickNextNode(car, nodes, rng);
   const t = car.target;
   const dist = Math.hypot(t.x - car.pos.x, t.z - car.pos.z);
   if (dist < 3.5) {
-    chooseNextNode(car, nodes, rng);
+    pickNextNode(car, nodes, rng);
     return;
   }
   const wantYaw = Math.atan2(t.x - car.pos.x, t.z - car.pos.z);
@@ -178,7 +195,8 @@ export function updateTrafficCar(car, nodes, rng, dt, allCars, colliders) {
   car.velAngle = car.yaw;
   car.pos.x += fx * car.speed * dt;
   car.pos.z += fz * car.speed * dt;
-  collideCircle(car.pos, CAR.radius, colliders);
+  pushOutOfWalls(car.pos, DRIVE.radius, colliders);
+  setBrakeLights(car, blocked && car.speed > 1);
   syncMesh(car);
   spinWheels(car, dt);
 }
@@ -188,14 +206,14 @@ export function updateTrafficCar(car, nodes, rng, dt, allCars, colliders) {
 // reverses, coasting bleeds speed. Lateral: the steering turns the nose;
 // the travel direction follows at a rate set by grip — generous on dry
 // asphalt, lazy on the ridge ice, laziest with the handbrake held.
-export function updatePlayerCar(car, input, dt, colliders, allCars, onCrash) {
+export function drivePlayerCar(car, input, dt, colliders, allCars, onCrash, onNearMiss) {
   const throttle = (input.up ? 1 : 0) - (input.down ? 1 : 0);
   const steerIn = (input.left ? 1 : 0) - (input.right ? 1 : 0);
   const hand = !!input.handbrake;
-  const onIce = MECHANIC.type === 'ice' && car.pos.x > CITY.beachX;
+  const onIce = MECHANIC.type === 'ice' && car.pos.x > TOWN.beachX;
 
-  let topSpeed = CAR.maxSpeed;
-  let accel = CAR.accel;
+  let topSpeed = DRIVE.maxSpeed;
+  let accel = DRIVE.accel;
   car.boosting = false;
   if (MECHANIC.type === 'nitro' && input.run && car.boost > 0) {
     topSpeed *= 1.35;
@@ -205,61 +223,73 @@ export function updatePlayerCar(car, input, dt, colliders, allCars, onCrash) {
   } else if (car.boost !== undefined) {
     car.boost = Math.min(100, car.boost + dt * 8);
   }
-  if (MECHANIC.type === 'solar' && car.pos.x > CITY.beachX) topSpeed *= 1.3;
+  if (MECHANIC.type === 'solar' && car.pos.x > TOWN.beachX) topSpeed *= 1.3;
 
   // Steering: more lock at speed, flipped in reverse, sharper on the brake.
   const speedFrac = Math.min(1, Math.abs(car.speed) / topSpeed);
-  const lock = (hand ? CAR.handbrakeTurn : CAR.turnRate) * (0.35 + 0.65 * speedFrac);
+  const lock = (hand ? DRIVE.handbrakeTurn : DRIVE.turnRate) * (0.35 + 0.65 * speedFrac);
   const steerGoal = steerIn * lock * (car.speed < -0.5 ? -1 : 1);
   const steerRate = onIce ? 4 : 8;
   car.steer += (steerGoal - car.steer) * Math.min(1, dt * steerRate);
   car.yaw += car.steer * dt * Math.min(1, Math.abs(car.speed) / 6 + 0.15);
 
   // Travel direction chases the nose; grip is the chase rate.
-  let gripRate = CAR.grip;
+  let gripRate = DRIVE.grip;
   if (onIce) gripRate *= 0.45;
   if (hand) gripRate *= 0.4;
   car.velAngle += angleDelta(car.velAngle, car.yaw) * Math.min(1, dt * gripRate);
 
   // Longitudinal forces.
+  const braking = throttle < 0 && car.speed > 0.5;
   if (throttle > 0) {
     car.speed += accel * dt * (1 - speedFrac * 0.75);
   } else if (throttle < 0) {
-    car.speed -= (car.speed > 0.5 ? CAR.brake : accel * 0.6) * dt;
+    car.speed -= (car.speed > 0.5 ? DRIVE.brake : accel * 0.6) * dt;
   } else {
     car.speed -= car.speed * Math.min(1, dt * (hand ? 2.2 : 0.7));
   }
-  car.speed = Math.max(-CAR.reverseMax, Math.min(topSpeed, car.speed));
+  car.speed = Math.max(-DRIVE.reverseMax, Math.min(topSpeed, car.speed));
   if (Math.abs(car.speed) < 0.05 && throttle === 0) car.speed = 0;
+  setBrakeLights(car, braking || hand);
 
   car.pos.x += Math.sin(car.velAngle) * car.speed * dt;
   car.pos.z += Math.cos(car.velAngle) * car.speed * dt;
 
   // Walls: scrub most of the speed, report hard hits as crashes.
-  if (collideCircle(car.pos, CAR.radius, colliders)) {
+  if (pushOutOfWalls(car.pos, DRIVE.radius, colliders)) {
     const impact = Math.abs(car.speed);
     car.speed *= 0.35;
     car.velAngle = car.yaw;
     if (impact > 14 && onCrash) onCrash(impact);
   }
   // Other cars: soft two-body shove, traffic loses more speed than you do.
+  // A fast, close pass that is NOT a touch is a near miss — danger money.
+  const now = Date.now() / 1000;
   for (const other of allCars) {
     if (other === car || !other.alive) continue;
     const dx = car.pos.x - other.pos.x;
     const dz = car.pos.z - other.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d >= 3.4 || d <= 0.001) continue;
-    const push = (3.4 - d) / 2;
-    car.pos.x += (dx / d) * push;
-    car.pos.z += (dz / d) * push;
-    other.pos.x -= (dx / d) * push;
-    other.pos.z -= (dz / d) * push;
-    if (other.kind === 'traffic') other.speed *= 0.6;
-    if (Math.abs(car.speed) > 10 && onCrash) onCrash(Math.abs(car.speed) * 0.5);
-    car.speed *= 0.92;
+    if (d < 3.4 && d > 0.001) {
+      const push = (3.4 - d) / 2;
+      car.pos.x += (dx / d) * push;
+      car.pos.z += (dz / d) * push;
+      other.pos.x -= (dx / d) * push;
+      other.pos.z -= (dz / d) * push;
+      if (other.kind === 'traffic') other.speed *= 0.6;
+      if (Math.abs(car.speed) > 10 && onCrash) onCrash(Math.abs(car.speed) * 0.5);
+      car.speed *= 0.92;
+    } else if (
+      onNearMiss && other.kind === 'traffic' && Math.abs(car.speed) > HEAT.nearMissMinSpeed &&
+      d < 3.4 + HEAT.nearMissGap && d >= 3.4 &&
+      (car.nmSeen[other.id] || 0) + HEAT.nearMissCooldown < now
+    ) {
+      car.nmSeen[other.id] = now;
+      onNearMiss(other);
+    }
   }
-  car.pos.x = Math.max(-CITY.boundZ, Math.min(CITY.boundX, car.pos.x));
-  car.pos.z = Math.max(-CITY.boundZ, Math.min(CITY.boundZ, car.pos.z));
+  car.pos.x = Math.max(-TOWN.boundZ, Math.min(TOWN.boundX, car.pos.x));
+  car.pos.z = Math.max(-TOWN.boundZ, Math.min(TOWN.boundZ, car.pos.z));
   syncMesh(car);
   spinWheels(car, dt);
 }
@@ -267,7 +297,7 @@ export function updatePlayerCar(car, input, dt, colliders, allCars, onCrash) {
 // ------------------------------------------------------------------ police
 // A cruiser does not aim at where you are; it aims at where you will be,
 // leading the target by the time it needs to get there.
-export function updatePoliceCar(car, playerPos, dt, colliders, allCars, onRam) {
+export function chasePolice(car, playerPos, dt, colliders, allCars, onRam) {
   // Estimate the player's velocity from successive sightings.
   if (!car._seenPos) car._seenPos = playerPos.clone();
   const pvx = dt > 0 ? (playerPos.x - car._seenPos.x) / dt : 0;
@@ -286,7 +316,7 @@ export function updatePoliceCar(car, playerPos, dt, colliders, allCars, onRam) {
   car.velAngle = car.yaw;
   car.pos.x += Math.sin(car.yaw) * car.speed * dt;
   car.pos.z += Math.cos(car.yaw) * car.speed * dt;
-  collideCircle(car.pos, CAR.radius, colliders);
+  pushOutOfWalls(car.pos, DRIVE.radius, colliders);
   if (distNow < 3.6 && onRam) onRam(car);
   syncMesh(car);
   spinWheels(car, dt);
@@ -299,6 +329,6 @@ export function updatePoliceCar(car, playerPos, dt, colliders, allCars, onRam) {
   }
 }
 
-export function randomCarColor(rng) {
-  return PALETTE.carPaint[Math.floor(rng() * PALETTE.carPaint.length)];
+export function pickPaint(rng) {
+  return COLORS.carPaint[Math.floor(rng() * COLORS.carPaint.length)];
 }

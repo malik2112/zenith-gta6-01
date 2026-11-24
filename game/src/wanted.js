@@ -1,13 +1,15 @@
-// ZENITH — wanted.js (fresh rewrite, round 3)
+// ZENITH — wanted.js (round 3 redo)
 // Heat, stars, and the Ridge PD. Crimes price themselves in stars; the
 // department answers with as many cruisers as the level warrants,
 // spawning them on real roads a sensible distance away. Stars cool one
 // at a time after a quiet stretch with nobody close enough to see you.
-// On foot, a stopped cruiser parked against you for long enough is a bust.
-import { WANTED } from './config.js';
-import { spawnCar, updatePoliceCar, spinWheels } from './vehicles.js';
+// On foot, a stopped cruiser parked against you for long enough is a
+// bust. The siren's volume follows the nearest cruiser, so you can hear
+// how close the tail is.
+import { HEAT } from './config.js';
+import { summonCar, chasePolice, spinWheels } from './vehicles.js';
 
-export function createWanted() {
+export function newHeat() {
   return {
     level: 0,
     quietTimer: 0,
@@ -24,7 +26,7 @@ function cruisersForLevel(level) {
 
 // Pick a road node 70–110 m from the player to dispatch a cruiser from,
 // so it arrives driving on a street instead of materialising in a wall.
-function dispatchPoint(G) {
+function pickDispatch(G) {
   const p = G.player.pos;
   const nodes = G.city && G.city.nodes ? G.city.nodes : [];
   let best = null;
@@ -45,12 +47,12 @@ function dispatchPoint(G) {
   };
 }
 
-export function syncPolice(G) {
+export function matchCruisers(G) {
   const w = G.wanted;
   const want = cruisersForLevel(w.level);
   while (w.police.length < want) {
-    const at = dispatchPoint(G);
-    const car = spawnCar(G.scene, at.x, at.z, Math.random() * Math.PI * 2, 0x14181c, 'police');
+    const at = pickDispatch(G);
+    const car = summonCar(G.scene, at.x, at.z, Math.random() * Math.PI * 2, 0x14181c, 'police');
     w.police.push(car);
     G.cars.push(car);
   }
@@ -67,20 +69,20 @@ export function syncPolice(G) {
   }
 }
 
-export function addHeat(G, amount, reason) {
+export function raiseHeat(G, amount, reason) {
   const w = G.wanted;
   const before = w.level;
-  w.level = Math.min(WANTED.max, w.level + amount);
+  w.level = Math.min(HEAT.max, w.level + amount);
   w.quietTimer = 0;
   if (w.level > before) {
     G.hudMessage(`WANTED LEVEL ${w.level} — ${reason}`, 'bad');
     G.sound.sirenStart();
     w.sirenOn = true;
   }
-  syncPolice(G);
+  matchCruisers(G);
 }
 
-export function updateWanted(G, dt) {
+export function tickHeat(G, dt) {
   const w = G.wanted;
   if (w.level === 0) return;
   w.quietTimer += dt;
@@ -90,14 +92,16 @@ export function updateWanted(G, dt) {
   for (const c of w.police) {
     nearest = Math.min(nearest, Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z));
   }
-  if (w.quietTimer > WANTED.decaySeconds && nearest > 55) {
+  // Siren loudness tracks the tail: close is loud, far is a whisper.
+  if (w.sirenOn) G.sound.sirenSet(nearest);
+  if (w.quietTimer > HEAT.decaySeconds && nearest > 55) {
     w.level -= 1;
     w.quietTimer = 0;
     G.hudMessage(
       w.level > 0 ? `Heat cooling… wanted level ${w.level}` : 'You lost them. Heat is off.',
       'good',
     );
-    syncPolice(G);
+    matchCruisers(G);
   }
 
   // Busted: on foot with a slow cruiser right on top of you.
@@ -107,13 +111,13 @@ export function updateWanted(G, dt) {
   }
   const pinned = w.police.some(
     (c) =>
-      Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z) < WANTED.bustDistance &&
+      Math.hypot(c.pos.x - G.player.pos.x, c.pos.z - G.player.pos.z) < HEAT.bustDistance &&
       Math.abs(c.speed) < 4,
   );
   if (pinned) {
     w.bustTimer += dt;
     G.hudFlash('bust');
-    if (w.bustTimer >= WANTED.bustSeconds) {
+    if (w.bustTimer >= HEAT.bustSeconds) {
       w.bustTimer = 0;
       G.busted();
     }
@@ -134,7 +138,7 @@ function shovePlayer(G, cop) {
   if (G.player.hp <= 0) G.wasted();
 }
 
-export function updatePolice(G, dt) {
+export function tickCruisers(G, dt) {
   for (const car of G.wanted.police) {
     if (!car.alive) continue;
     // Screenshot staging: a cruiser flagged shotFollow holds formation
@@ -158,7 +162,7 @@ export function updatePolice(G, dt) {
       }
       continue;
     }
-    updatePoliceCar(car, G.player.pos, dt, G.city.colliders, G.cars, (cop) => {
+    chasePolice(car, G.player.pos, dt, G.city.colliders, G.cars, (cop) => {
       if (G.player.onFoot) {
         if (Math.hypot(cop.pos.x - G.player.pos.x, cop.pos.z - G.player.pos.z) < 2.6) {
           shovePlayer(G, cop);
@@ -175,10 +179,10 @@ export function updatePolice(G, dt) {
   }
 }
 
-export function clearWanted(G) {
+export function coolOff(G) {
   const w = G.wanted;
   w.level = 0;
   w.quietTimer = 0;
   w.bustTimer = 0;
-  syncPolice(G);
+  matchCruisers(G);
 }

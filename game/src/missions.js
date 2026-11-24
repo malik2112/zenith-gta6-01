@@ -1,12 +1,13 @@
-// ZENITH — missions.js (fresh rewrite, round 3)
+// ZENITH — missions.js (round 3 redo)
 // The story: five jobs for Professor Alden Vark, each a small state
 // machine with a glowing beacon, a minimap blip, and a cash reward.
 // Finish all five and the debt is settled. Every job starts at Ridge
-// Lodge; the next one waits there when the last is done.
+// Lodge; the next one waits there when the last is done. Timed jobs warn
+// you with a beep and a red objective line when the clock gets short.
 import * as THREE from 'three';
-import { spawnPed } from './pedestrians.js';
+import { summonWalker } from './pedestrians.js';
 import { HUB } from './config.js';
-import { syncPolice } from './wanted.js';
+import { matchCruisers } from './wanted.js';
 
 export const MISSIONS = [
   {
@@ -75,7 +76,7 @@ export const MISSIONS = [
   },
 ];
 
-export function createMissions() {
+export function newStory() {
   return {
     index: 0,
     state: 'idle', // idle | waiting-hub | active | done
@@ -83,19 +84,20 @@ export function createMissions() {
     collected: 0,
     packageIndex: 0,
     phase: 0,
+    warnedLow: false,
     beacon: null,
     beaconPos: null,
     pkgMeshes: [],
   };
 }
 
-export function currentMission(m) {
+export function activeJob(m) {
   return m.index < MISSIONS.length ? MISSIONS[m.index] : null;
 }
 
 // The objective beacon: a translucent pillar of light, three stacked
 // rings, and a spinning diamond so it reads from across the map.
-function buildBeacon(scene) {
+function raiseBeacon(scene) {
   const group = new THREE.Group();
   const pillar = new THREE.Mesh(
     new THREE.CylinderGeometry(3.2, 3.2, 40, 16, 1, true),
@@ -129,7 +131,7 @@ function buildBeacon(scene) {
   return group;
 }
 
-function removeBeacons(G) {
+function clearBeacons(G) {
   const m = G.missions;
   if (m.beacon) {
     G.scene.remove(m.beacon);
@@ -140,26 +142,27 @@ function removeBeacons(G) {
   m.pkgMeshes = [];
 }
 
-function showBeaconAt(G, pos) {
-  removeBeacons(G);
-  const beacon = buildBeacon(G.scene);
+function pointBeacon(G, pos) {
+  clearBeacons(G);
+  const beacon = raiseBeacon(G.scene);
   beacon.position.set(pos.x, 0, pos.z);
   G.missions.beacon = beacon;
   G.missions.beaconPos = { x: pos.x, z: pos.z };
 }
 
 // The lodge beacon: drive here to pick up the next job.
-export function placeHubBeacon(G) {
-  if (!G.missions.beacon) showBeaconAt(G, { x: HUB.x, z: HUB.z });
+export function markLodge(G) {
+  if (!G.missions.beacon) pointBeacon(G, { x: HUB.x, z: HUB.z });
 }
 
-export function startMission(G, index) {
+export function beginJob(G, index) {
   const m = G.missions;
   const def = MISSIONS[index];
   m.index = index;
   m.collected = 0;
   m.packageIndex = 0;
   m.phase = 0;
+  m.warnedLow = false;
   if (!def) {
     m.state = 'done';
     return;
@@ -167,23 +170,23 @@ export function startMission(G, index) {
   m.state = 'active';
   m.timer = def.timeLimit || 0;
   if (def.type === 'collect') {
-    removeBeacons(G);
+    clearBeacons(G);
     for (const p of def.packages) {
-      const beacon = buildBeacon(G.scene);
+      const beacon = raiseBeacon(G.scene);
       beacon.position.set(p.x, 0, p.z);
       beacon.scale.setScalar(0.6);
       m.pkgMeshes.push(beacon);
     }
     m.beaconPos = { ...def.packages[0] };
   } else if (def.target) {
-    showBeaconAt(G, def.target);
+    pointBeacon(G, def.target);
   }
   if (def.startHeat) {
     G.wanted.level = Math.max(G.wanted.level, def.startHeat);
     G.wanted.quietTimer = 0;
     G.sound.sirenStart();
     G.wanted.sirenOn = true;
-    syncPolice(G);
+    matchCruisers(G);
   }
   G.hudMessage(`MISSION ${def.id}: ${def.title} — $${def.reward}`, 'mission');
   G.sound.missionStart();
@@ -191,16 +194,16 @@ export function startMission(G, index) {
 }
 
 // Called whenever Nadia gets into a car; mission 2 cares.
-export function onPlayerEnterCar(G) {
+export function noteCarTaken(G) {
   const m = G.missions;
   if (m.state === 'active' && MISSIONS[m.index] && MISSIONS[m.index].type === 'steal-deliver') {
     m.phase = 1;
   }
 }
 
-function spawnGuards(G, at) {
+function postGuards(G, at) {
   for (let i = 0; i < 2; i++) {
-    const guard = spawnPed(G.scene, at.x + (i ? 6 : -6), at.z + 8, Math.random, 'rival');
+    const guard = summonWalker(G.scene, at.x + (i ? 6 : -6), at.z + 8, Math.random, 'rival');
     guard.hp = 100;
     guard.shootTimer = 1;
     G.rivals.push(guard);
@@ -209,7 +212,7 @@ function spawnGuards(G, at) {
 }
 
 // One handler per mission type; each returns true when the job is done.
-const HANDLERS = {
+const JOB_STEPS = {
   reach(G, def, near) {
     if (!near(def.target, def.radius)) return false;
     if (G.player.onFoot) {
@@ -226,7 +229,7 @@ const HANDLERS = {
     if (m.phase === 0 && G.wanted.level === 0) {
       m.phase = 1;
       G.hudMessage('Heat is off — get to the safehouse!', 'good');
-      showBeaconAt(G, def.target);
+      pointBeacon(G, def.target);
     }
     return m.phase === 1 && near(def.target, def.radius);
   },
@@ -254,23 +257,28 @@ const HANDLERS = {
       G.player.cash += 1500;
       G.hudMessage('Cash grabbed! Get to the docks — the PD is coming!', 'bad');
       G.sound.cash();
-      showBeaconAt(G, def.escape);
-      spawnGuards(G, def.target);
+      pointBeacon(G, def.escape);
+      postGuards(G, def.target);
       return false;
     }
     return m.phase === 1 && near(def.escape, def.radius);
   },
 };
 
-export function updateMissions(G, dt) {
+export function tickStory(G, dt) {
   const m = G.missions;
   if (m.state !== 'active') return;
   const def = MISSIONS[m.index];
   if (!def) return;
   if (def.timeLimit) {
     m.timer -= dt;
+    if (m.timer < 30 && !m.warnedLow) {
+      m.warnedLow = true;
+      G.hudMessage('Thirty seconds left on the clock!', 'bad');
+      G.sound.beep();
+    }
     if (m.timer <= 0) {
-      failMission(G, 'Out of time.');
+      flunkJob(G, 'Out of time.');
       return;
     }
   }
@@ -281,18 +289,18 @@ export function updateMissions(G, dt) {
   const px = G.player.pos.x;
   const pz = G.player.pos.z;
   const near = (t, r) => Math.hypot(px - t.x, pz - t.z) < r;
-  const handler = HANDLERS[def.type];
-  if (handler && handler(G, def, near)) completeMission(G);
+  const handler = JOB_STEPS[def.type];
+  if (handler && handler(G, def, near)) finishJob(G);
 }
 
-function completeMission(G) {
+function finishJob(G) {
   const m = G.missions;
   const def = MISSIONS[m.index];
   G.player.cash += def.reward;
   G.sound.cash();
   G.hudMessage(`MISSION COMPLETE: ${def.title} — +$${def.reward}`, 'good');
   G.stats.missionsDone++;
-  removeBeacons(G);
+  clearBeacons(G);
   m.index++;
   if (m.index >= MISSIONS.length) {
     m.state = 'done';
@@ -301,29 +309,29 @@ function completeMission(G) {
   }
   G.saveGame();
   G.hudMessage("New job at Ridge Lodge — head back to Professor Alden Vark's base.", 'mission');
-  showBeaconAt(G, { x: HUB.x, z: HUB.z });
+  pointBeacon(G, { x: HUB.x, z: HUB.z });
   m.state = 'waiting-hub';
 }
 
-export function failMission(G, reason) {
+export function flunkJob(G, reason) {
   const m = G.missions;
   G.hudMessage(`MISSION FAILED: ${reason} Talk to Professor Alden Vark to retry.`, 'bad');
   G.sound.busted();
-  removeBeacons(G);
-  showBeaconAt(G, { x: HUB.x, z: HUB.z });
+  clearBeacons(G);
+  pointBeacon(G, { x: HUB.x, z: HUB.z });
   m.state = 'waiting-hub';
 }
 
 // Standing in the lodge beacon starts the next job.
-export function updateHub(G) {
+export function checkLodge(G) {
   const m = G.missions;
   if (m.state !== 'waiting-hub') return;
   if (Math.hypot(G.player.pos.x - HUB.x, G.player.pos.z - HUB.z) < 9) {
-    startMission(G, m.index);
+    beginJob(G, m.index);
   }
 }
 
-export function missionObjectiveText(G) {
+export function objectiveLine(G) {
   const m = G.missions;
   if (m.state === 'waiting-hub') {
     const next = MISSIONS[m.index];

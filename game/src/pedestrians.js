@@ -1,17 +1,17 @@
-// ZENITH — pedestrians.js (fresh rewrite, round 3)
+// ZENITH — pedestrians.js (round 3 redo)
 // The people of Zenith: one low-poly figure builder shared by the hero,
 // the walkers and the rival crew, plus the walker brain — a small state
-// machine (pause, stroll, flee) that keeps them on the pavements and
-// sends them running when shots ring out or a car comes too close.
+// machine (pause, stroll, chat, flee) that keeps them on the pavements
+// and sends them running when shots ring out or a car comes too close.
 import * as THREE from 'three';
-import { TRAFFIC } from './config.js';
+import { CROWD } from './config.js';
 
 const SHIRT_COLORS = [0xd95f4b, 0x4b8ad9, 0x53b06a, 0xd9b84b, 0x9a5fd0, 0xe8e8e8, 0x3a3f45, 0xe08aa8];
 const SKIN_TONES = [0xc98e6a, 0xa9744f, 0xe3b48f, 0x8a5a3c];
 
 // A person from boxes: torso, head, two legs, two arms. Limbs pivot at the
 // shoulder/hip so the walk cycle is just a sine on rotation.x.
-export function makePersonMesh(shirtColor, skinColor = 0xc98e6a) {
+export function buildFigure(shirtColor, skinColor = 0xc98e6a) {
   const group = new THREE.Group();
   const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
   const skin = new THREE.MeshLambertMaterial({ color: skinColor });
@@ -23,9 +23,16 @@ export function makePersonMesh(shirtColor, skinColor = 0xc98e6a) {
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.38, 0.34), skin);
   head.position.y = 1.68;
   group.add(head);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.1, 0.38), trousers);
-  cap.position.y = 1.9;
-  group.add(cap);
+  // A flat cap on some heads, a hair slab on the rest.
+  if (Math.random() < 0.5) {
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.1, 0.38), trousers);
+    cap.position.y = 1.9;
+    group.add(cap);
+  } else {
+    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.36), new THREE.MeshLambertMaterial({ color: 0x2a2018 }));
+    hair.position.y = 1.86;
+    group.add(hair);
+  }
 
   function limb(w, h, mat, x, y) {
     const pivot = new THREE.Group();
@@ -43,10 +50,10 @@ export function makePersonMesh(shirtColor, skinColor = 0xc98e6a) {
   return { group, legL, legR, armL, armR };
 }
 
-export function spawnPed(scene, x, z, rng, kind = 'walker') {
+export function summonWalker(scene, x, z, rng, kind = 'walker') {
   const shirt = SHIRT_COLORS[Math.floor(rng() * SHIRT_COLORS.length)];
   const skin = SKIN_TONES[Math.floor(rng() * SKIN_TONES.length)];
-  const parts = makePersonMesh(shirt, skin);
+  const parts = buildFigure(shirt, skin);
   parts.group.position.set(x, 0, z);
   scene.add(parts.group);
   return {
@@ -66,13 +73,13 @@ export function spawnPed(scene, x, z, rng, kind = 'walker') {
     alive: true,
     fleeing: false,
     fleeTimer: 0,
-    state: 'pause', // pause | stroll | flee
+    state: 'pause', // pause | stroll | chat | flee
   };
 }
 
 // A point on the pavement near a random corner: intersection plus an
 // offset that lands on the sidewalk strip, never in the road.
-export function randomSidewalkPoint(centers, rng) {
+export function sidewalkSpot(centers, rng) {
   const cx = centers[Math.floor(rng() * centers.length)];
   const cz = centers[Math.floor(rng() * centers.length)];
   const off = 11 + rng() * 2;
@@ -102,9 +109,9 @@ function animateWalk(ped, dt) {
 
 // Walker brain. Danger (a shot's end point, a body, a fast car) flips the
 // state to flee for a few seconds; fleeing means sprinting away from the
-// danger point, not toward a target. Otherwise: pause, pick a corner,
-// stroll to it, repeat.
-export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
+// danger point, not toward a target. Otherwise: pause, sometimes chat
+// with the nearest walker, pick a corner, stroll to it, repeat.
+export function walkPerson(ped, centers, rng, dt, dangerPos, colliders, allPeds) {
   if (!ped.alive) return;
 
   if (dangerPos) {
@@ -133,12 +140,34 @@ export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
     ped.speed = 0;
     ped.waitTimer -= dt;
     if (ped.waitTimer <= 0) {
-      ped.target = randomSidewalkPoint(centers, rng);
-      ped.state = 'stroll';
+      // One in three pauses turns into a chat: face the nearest walker
+      // and stand still together for a while.
+      const near = allPeds
+        ? allPeds.find((o) => o !== ped && o.alive && Math.hypot(o.pos.x - ped.pos.x, o.pos.z - ped.pos.z) < 6)
+        : null;
+      if (near && rng() < 0.35) {
+        ped.state = 'chat';
+        ped.waitTimer = 3 + rng() * 4;
+        ped.chatWith = near;
+      } else {
+        ped.target = sidewalkSpot(centers, rng);
+        ped.state = 'stroll';
+      }
+    }
+  } else if (ped.state === 'chat') {
+    ped.speed = 0;
+    ped.waitTimer -= dt;
+    if (ped.chatWith && ped.chatWith.alive) {
+      turnToward(ped, Math.atan2(ped.chatWith.pos.x - ped.pos.x, ped.chatWith.pos.z - ped.pos.z), 3, dt);
+    }
+    if (ped.waitTimer <= 0) {
+      ped.state = 'pause';
+      ped.waitTimer = 0.5 + rng() * 1.5;
+      ped.chatWith = null;
     }
   } else {
     // stroll
-    if (!ped.target) ped.target = randomSidewalkPoint(centers, rng);
+    if (!ped.target) ped.target = sidewalkSpot(centers, rng);
     const dx = ped.target.x - ped.pos.x;
     const dz = ped.target.z - ped.pos.z;
     if (Math.hypot(dx, dz) < 1.5) {
@@ -148,7 +177,7 @@ export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
       ped.speed = 0;
     } else {
       turnToward(ped, Math.atan2(dx, dz), 3, dt);
-      ped.speed += (TRAFFIC.pedSpeed - ped.speed) * Math.min(1, dt * 3);
+      ped.speed += (CROWD.pedSpeed - ped.speed) * Math.min(1, dt * 3);
       ped.pos.x += Math.sin(ped.yaw) * ped.speed * dt;
       ped.pos.z += Math.cos(ped.yaw) * ped.speed * dt;
     }
@@ -157,7 +186,7 @@ export function updatePed(ped, centers, rng, dt, dangerPos, colliders) {
 }
 
 // A fallen ped tips over and stays down. Returns true while animating.
-export function updateFallenPed(ped, dt) {
+export function topplePed(ped, dt) {
   if (ped.alive) return false;
   ped.mesh.rotation.x += (Math.PI / 2 - ped.mesh.rotation.x) * Math.min(1, dt * 6);
   return true;
